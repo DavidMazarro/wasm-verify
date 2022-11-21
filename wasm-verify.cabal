@@ -33,6 +33,7 @@ executable wasm-verify
   build-depends:       base >= 4.7 && < 5
                      , optparse-applicative
                      , path
+                     , pretty-simple
                      , wasm-verify
   ghc-options:         -Wall
                        -Wcompat
@@ -49,9 +50,14 @@ test-suite test
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test
   main-is:             Spec.hs
-  -- other-modules:       ExampleModule1
-  --                    , ExampleModule2
+  other-modules:       WasmVerify.ModuleLoaderSpec
+                     --, ExampleModule2
   build-depends:       base
+                     , bytestring
+                     , directory
+                     , path
                      , hspec
+                     , wasm
+                     , wasm-verify
   build-tools:         hspec-discover
   default-language:    Haskell2010
