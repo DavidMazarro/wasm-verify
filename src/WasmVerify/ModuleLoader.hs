@@ -1,3 +1,4 @@
+-- | Provides WASM module loading functions.
 module WasmVerify.ModuleLoader
   ( loadModuleFromFile
   ) where
@@ -8,6 +9,12 @@ import qualified Data.ByteString               as BS
 import qualified Language.Wasm                 as Wasm
 import           Path
 
+----------------------------------------------------------------------------
+
+-- | Loads a binary WASM module provided a file path. 
+-- In case there's an error while reading the file,
+-- or a 'Wasm.ValidationError' comes up when validating the WASM module,
+-- a t'Control.Exception.Safe.StringException' is thrown.
 loadModuleFromFile :: Path Abs File -> IO Wasm.ValidModule
 loadModuleFromFile filepath = do
   fileContents <- BS.readFile $ fromAbsFile filepath
