@@ -1,24 +1,31 @@
+cabal-version:       2.2
+
 name:                wasm-verify
 version:             0.1.0.0
 -- synopsis:
 -- description:
 homepage:            https://github.com/DavidMazarro/wasm-verify#readme
-license:             BSD3
+license:             BSD-3-Clause
 license-file:        LICENSE
 author:              David Mazarro
 maintainer:          davidmazarro98@gmail.com
 copyright:           2022 Author name here
 category:            Web
 build-type:          Simple
-cabal-version:       >=1.10
 extra-source-files:  README.md
                      CHANGELOG.md
 
+common common-extensions
+  default-extensions:  OverloadedStrings
+                     , LambdaCase
+
 library
+  import:              common-extensions
   hs-source-dirs:      src
   exposed-modules:     WasmVerify.ModuleLoader
   build-depends:       base
                      , bytestring
+                     , megaparsec
                      , path
                      , safe-exceptions
                      , wasm >= 1.1.1
@@ -26,6 +33,7 @@ library
   default-language:    Haskell2010
 
 executable wasm-verify
+  import:              common-extensions
   hs-source-dirs:      app
   main-is:             Main.hs
   default-language:    Haskell2010
@@ -47,6 +55,7 @@ executable wasm-verify
                        -Wredundant-constraints
 
 test-suite test
+  import:              common-extensions
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test
   main-is:             Spec.hs
