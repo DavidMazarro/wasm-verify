@@ -1,19 +1,18 @@
 {-# LANGUAGE TemplateHaskell #-}
 
-module WasmVerify.ModuleLoaderSpec
-  ( spec
-  ) where
+module WasmVerify.ModuleLoaderSpec (
+  spec,
+) where
 
-import qualified Data.ByteString               as BS
-import           Data.Either                    ( fromRight )
-import qualified Language.Wasm                 as Wasm
-import qualified Language.Wasm.Structure       as Wasm
-import qualified Language.Wasm.Validate        as Wasm
-import           Path
-import           System.Directory
-import           Test.Hspec
-import           WasmVerify.ModuleLoader
-
+import qualified Data.ByteString as BS
+import Data.Either (fromRight)
+import qualified Language.Wasm as Wasm
+import qualified Language.Wasm.Structure as Wasm
+import qualified Language.Wasm.Validate as Wasm
+import Path
+import System.Directory
+import Test.Hspec
+import WasmVerify.ModuleLoader
 
 spec :: Spec
 spec = do
@@ -26,7 +25,7 @@ spec = do
         let decodedModule = fromRight Wasm.emptyModule $ Wasm.decode example
         let wasmModule = Right <$> loadModuleFromFile examplePath
         wasmModule `shouldReturn` Wasm.validate decodedModule
-      
+
     context "given a non-existing file" $
       it "throws an exception" $ do
         pending
