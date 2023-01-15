@@ -16,20 +16,31 @@ extra-source-files:  README.md
                      CHANGELOG.md
 
 common common-extensions
-  default-extensions:  OverloadedStrings
+  default-extensions:  DeriveAnyClass
+                     , DerivingStrategies
+                     , GeneralizedNewtypeDeriving
+                     , OverloadedStrings
                      , RecordWildCards
                      , TypeApplications
 
 library
   import:              common-extensions
   hs-source-dirs:      src
+                     , verifiwasm
   exposed-modules:     WasmVerify.ModuleLoader
+                     , VerifiWASM.ASTValidator
+                     , VerifiWASM.LangTypes
+                     , VerifiWASM.Parser
+                     , VerifiWASM.VerifiWASM
   build-depends:       base
+                     , ansi-terminal
                      , bytestring
                      , megaparsec
+                     , mtl
                      , path
                      , safe-exceptions
                      , text
+                     , transformers
                      , wasm >= 1.1.1
   ghc-options:         -Wall -Werror -haddock
   default-language:    Haskell2010
