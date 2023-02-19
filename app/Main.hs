@@ -6,19 +6,20 @@ import Control.Exception (
   ErrorCall (ErrorCall),
   throwIO,
  )
-import System.Console.ANSI
-
 import Control.Monad (when)
 import Data.Version (showVersion)
 import GHC.IO.Exception (ExitCode (ExitSuccess))
 
 -- import           GHC.IO.Exception
+import qualified Data.Text.IO as T
+import Helpers.ANSI (colorInRed)
 import Options.Applicative
 import Options.Applicative.Extra (helperWith)
 import Path
 import Paths_wasm_verify (version)
 import System.Process (readProcessWithExitCode)
 import Text.Pretty.Simple (pPrint)
+import VerifiWASM.Parser (parseVerifiWASMFile)
 import WasmVerify.ModuleLoader (loadModuleFromFile)
 
 ----------------------------------------------------------------------------
@@ -70,11 +71,16 @@ main = do
   case fileExt of
     ".smt2" -> do
       runZ3WithFile filepath
+    ".verifiwasm" -> do
+      res <- parseVerifiWASMFile filepath
+      case res of
+        (Just assert) -> pPrint assert
+        Nothing -> return ()
     ".wasm" -> do
       wasmModule <- loadModuleFromFile filepath
       when debugWasmADT $ pPrint wasmModule
     _ -> do
-      fail "The file extension must be .smt2 or .wasm"
+      fail "The file extension must be .wasm, .smt2 or .verifiwasm"
 
 {- | Runs the Z3 solver with the contents of the provided SMTLIB2 file
  and outputs the results in the console.
@@ -87,13 +93,13 @@ runZ3WithFile filepath = do
       ["-smt2", fromAbsFile filepath]
       ""
 
+  when (exitCode /= ExitSuccess) $ T.putStrLn . colorInRed $ "Z3 finished with errors:\n"
   putStrLn stdout
 
   -- Throw a Haskell error if the exit code is non-zero
   -- and log the stderr of Z3
   when (exitCode /= ExitSuccess) $ do
-    setSGR [SetColor Foreground Vivid Red]
-    putStrLn "Z3 finished with the following errors:"
-    setSGR [Reset]
+    T.putStrLn . colorInRed $ "Z3 finished with the following errors (obtained from stderr):"
     putStrLn stderr
+    T.putStrLn "──────────────────────────────────────"
     throwIO $ ErrorCall "command failed"
