@@ -12,6 +12,7 @@ data Program = Program
   { functions :: [Function],
     ghostFunctions :: [GhostFunction]
   }
+  deriving (Show)
 
 {- | These reflect the behavior of the target
  WASM functions via verification conditions
@@ -23,32 +24,49 @@ data Function = Function
     funcReturns :: [TypedIdentifier],
     funcSpec :: Spec
   }
+  deriving (Show)
 
 data GhostFunction = GhostFunction
   { ghostName :: Identifier,
     ghostArgs :: [TypedIdentifier],
-    ghostTermination :: [Termination],
+    ghostTermination :: Termination,
+    ghostRequires :: Requires,
     ghostExpr :: Expr
   }
+  deriving (Show)
 
-newtype Termination = Decreases TypedIdentifier
+newtype Termination = Decreases [Identifier]
+  deriving (Show)
 
-newtype TypedIdentifier = TypedIdentifier (Identifier, IdType)
+type TypedIdentifier = (Identifier, IdType)
 
 data Spec = Spec
   { locals :: [Local],
-    requires :: [Requires],
-    ensures :: [Ensures],
+    -- Order between sets of requires, ensures, and asserts doesn't matter
+    -- But within a given family, order DOES matter
+    requires :: Requires,
+    ensures :: Ensures,
     asserts :: [Assert]
   }
+  deriving (Show)
 
 newtype Local = Local [TypedIdentifier]
+  deriving (Show)
 
 newtype Requires = Requires Expr
+  deriving (Show)
 
 newtype Ensures = Ensures Expr
+  deriving (Show)
 
 newtype Assert = Assert (Int, Expr)
+  deriving (Show)
+
+data Declaration
+  = DeclAssert Assert
+  | DeclEnsures Ensures
+  | DeclRequires Requires
+  | DeclLocals Local
   deriving (Show)
 
 {- | This type encodes all the possible expressions for VerifiWASM.
@@ -59,7 +77,7 @@ newtype Assert = Assert (Int, Expr)
  * An @if \<boolean expr\> then \<expr\> else \<expr\>@.
  * A boolean value, i.e. @true@, @false@.
  * An integer value.
- * An expression using the functions provided by the [Core theory](https://smtlib.cs.uiowa.edu/theories-Core.shtml) from SMTLIB2.
+ * An expression using the functions provided by the [Core theory](https://smt  lib.cs.uiowa.edu/theories-Core.shtml) from SMTLIB2.
  * An expression using the functions provided by the [Ints theory](https://smtlib.cs.uiowa.edu/theories-Ints.shtml) from SMTLIB2.
 
  Expressions are untyped in this ADT, but will be typed
@@ -94,7 +112,7 @@ data Expr
   | -- | The boolean @true@ value
     BTrue
   | BNot Expr
-  | BImpl Expr
+  | BImpl Expr Expr
   | BAnd Expr Expr
   | BOr Expr Expr
   | BXor Expr Expr
@@ -117,6 +135,10 @@ data Expr
   | IAbs Expr
   deriving (Show)
 
+data ExprType = ExprBool | ExprInt
+  deriving (Eq, Show)
+
 data IdType = I32 | I64
+  deriving (Show)
 
 type Identifier = String
