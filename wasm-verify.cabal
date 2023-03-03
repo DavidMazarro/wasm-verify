@@ -1,4 +1,4 @@
-cabal-version:      2.2
+cabal-version:      3.6
 name:               wasm-verify
 version:            0.1.0.0
 
@@ -47,7 +47,7 @@ library
     , safe-exceptions
     , text
     , transformers
-    , wasm             >=1.1.1
+    , wasm                >=1.1.1
 
   ghc-options:      -Wall -Werror -haddock
   default-language: Haskell2010
@@ -73,10 +73,10 @@ executable wasm-verify
     -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
 
 test-suite test
-  import:           common-extensions
-  type:             exitcode-stdio-1.0
-  hs-source-dirs:   test
-  main-is:          Spec.hs
+  import:             common-extensions
+  type:               exitcode-stdio-1.0
+  hs-source-dirs:     test
+  main-is:            Spec.hs
   other-modules:
     VerifiWASM.ParserSpec
     WasmVerify.ModuleLoaderSpec
@@ -91,5 +91,5 @@ test-suite test
     , wasm
     , wasm-verify
 
-  build-tools:      hspec-discover >=0
-  default-language: Haskell2010
+  build-tool-depends: hspec-discover:hspec-discover
+  default-language:   Haskell2010
