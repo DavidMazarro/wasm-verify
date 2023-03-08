@@ -12,7 +12,6 @@ import Path
 import Text.Megaparsec
 import Text.Megaparsec.Char (alphaNumChar, char, letterChar, space1, string)
 import qualified Text.Megaparsec.Char.Lexer as Lexer
-import Text.Pretty.Simple (pPrint)
 import VerifiWASM.LangTypes
 
 type Parser = Parsec Void T.Text
@@ -22,7 +21,7 @@ parseVerifiWASMFile filepath = do
   fileContents <- T.readFile $ fromAbsFile filepath
   case runParser programParser (fromAbsFile filepath) fileContents of
     Left e -> putStrLn (errorBundlePretty e) >> return Nothing
-    Right program -> pPrint program >> return (Just program)
+    Right program -> return (Just program)
 
 programParser :: Parser Program
 programParser = do

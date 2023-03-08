@@ -8,8 +8,8 @@ import Control.Monad.Except
 import Control.Monad.Trans.Writer.CPS
 import Data.ByteString.Builder (Builder, toLazyByteString)
 import qualified Data.ByteString.Lazy as BS (putStr)
-import Data.Text.Lazy (Text)
-import Data.Text.Lazy.Encoding (encodeUtf8Builder)
+import Data.Text (Text)
+import Data.Text.Encoding (encodeUtf8Builder)
 import VerifiWASM.LangTypes
 
 {- | The base monad used for all actions and checks performed
