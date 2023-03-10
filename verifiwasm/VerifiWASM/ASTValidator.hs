@@ -1,10 +1,87 @@
 module VerifiWASM.ASTValidator where
 
 import Control.Monad (when)
+import Data.Containers.ListUtils (nubOrd)
+import qualified Data.Map as M
 import Data.Text (Text, pack)
 import Helpers.ANSI (bold)
 import VerifiWASM.LangTypes
 import VerifiWASM.VerifiWASM
+
+programTypes :: Program -> VerifiWASM FuncTypes
+programTypes Program{functions, ghostFunctions} = do
+  let functionNames = map funcName functions
+  let ghostFunctionNames = map ghostName ghostFunctions
+  let allNames = functionNames ++ ghostFunctionNames
+
+  -- Ensuring that there are no duplicate function/ghost function
+  -- names allows us to perform union of the VarTypes safely
+  -- since there will be no collisions.
+  ensureNoDuplicateNames allNames errMsgDups
+
+  functionVarTypes <-
+    mapM
+      ( \function -> do
+          funTypes <- functionTypes function
+          return $ M.singleton (funcName function) funTypes
+      )
+      functions
+  ghostFunctionVarTypes <-
+    mapM
+      ( \ghostFun -> do
+          ghostFunTypes <- ghostFunctionTypes ghostFun
+          return $ M.singleton (ghostName ghostFun) ghostFunTypes
+      )
+      ghostFunctions
+  let allVarTypes = functionVarTypes ++ ghostFunctionVarTypes
+
+  return $ foldl M.union M.empty allVarTypes
+  where
+    errMsgDups =
+      "A duplicate name for a function or ghost function was found. \n"
+        <> "Make sure that all functions and ghost functions are named differently."
+
+functionTypes :: Function -> VerifiWASM VarTypes
+functionTypes function = do
+  let argNames = map fst (funcArgs function)
+  let returnNames = map fst (funcReturns function)
+  let localDecls = concatMap localVars $ locals $ funcSpec function
+  let localNames = map fst localDecls
+  let allNames = argNames ++ returnNames ++ localNames
+
+  -- Ensuring that there are no duplicate argument/return/local
+  -- names to avoid identifier collisions.
+  ensureNoDuplicateNames allNames errMsgDups
+
+  return $
+    M.fromList (funcArgs function)
+      `M.union` M.fromList (funcReturns function)
+      `M.union` M.fromList localDecls
+  where
+    errMsgDups =
+      "Some arguments, return variables or local variables"
+        <> " with duplicate names were found in function: "
+        <> (bold . pack) (funcName function)
+        <> "\n"
+        <> "Make sure that all arguments, return variables and local variables"
+        <> " are named differently within a function declaration."
+
+ghostFunctionTypes :: GhostFunction -> VerifiWASM VarTypes
+ghostFunctionTypes ghostFun = do
+  let argNames = map fst (ghostArgs ghostFun)
+
+  -- Ensuring that there are no duplicate argument
+  -- names to avoid identifier collisions.
+  ensureNoDuplicateNames argNames errMsgDups
+
+  return $ M.fromList $ ghostArgs ghostFun
+  where
+    errMsgDups =
+      "Some arguments with duplicate names were found in ghost function: "
+        <> (bold . pack) (ghostName ghostFun)
+        <> "\n"
+        <> "Make sure that all arguments are named differently"
+        <> " within a ghost function declaration."
 
 {- | Validates an expression and returns its type,
  recursively validating the expressions inside.
@@ -67,7 +144,7 @@ validateExpr topExpr@(BGreaterOrEq leftExpr rightExpr) =
 validateExpr topExpr@(BGreater leftExpr rightExpr) =
   validateBinary topExpr leftExpr rightExpr ExprInt ExprBool
 validateExpr (IVar _) =
-  undefined
+  return ExprInt
 validateExpr (IInt _) =
   return ExprInt
 validateExpr topExpr@(INeg subExpr) =
@@ -176,6 +253,17 @@ validateSameType topExpr leftExpr rightExpr = do
       BEq _ _ -> ExprBool
       BDistinct _ _ -> ExprBool
       _ -> error "This shouldn't happen."
+
+----------- Helper functions -----------
+
+ensureNoDuplicateNames :: [Identifier] -> Text -> VerifiWASM ()
+ensureNoDuplicateNames names errMsg = do
+  -- If the number of names doesn't match
+  -- with the number of names without duplicates,
+  -- it means that indeed there are some duplicate names.
+  when (length names /= length (nubOrd names)) $
+    failWithError $
+      Failure errMsg
 
 prettyType :: ExprType -> Text
 prettyType ExprBool = "boolean"

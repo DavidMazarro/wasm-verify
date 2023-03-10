@@ -257,8 +257,6 @@ funCallParser = do
   args <- parens $ sepByCommas exprParser
   return $ FunCall identifier args
 
--- leParser = numberParser <|> identifierParser
-
 identifierParser :: Parser Identifier
 identifierParser = identifierParser' False
 

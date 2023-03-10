@@ -4,6 +4,8 @@
 
 module VerifiWASM.LangTypes where
 
+import Data.Map
+
 {- | Programs are comprised of a list of functions
  as well as a list of ghost functions. Programs
  /can/ be empty, i.e. have no functions of either kind.
@@ -50,7 +52,7 @@ data Spec = Spec
   }
   deriving (Show)
 
-newtype Local = Local [TypedIdentifier]
+newtype Local = Local {localVars :: [TypedIdentifier]}
   deriving (Show)
 
 newtype Requires = Requires Expr
@@ -142,3 +144,17 @@ data IdType = I32 | I64
   deriving (Show)
 
 type Identifier = String
+
+{- | A map that stores all of the type scopes (see 'VarTypes')
+ associated with the functions and ghost functions in a specification.
+ Used in the analysis performed after the parsing for validating the specification.
+ Since functions and ghost functions share a global namespace, they can be
+ given a unique key which is its 'Identifier' without conflicts.
+-}
+type FuncTypes = Map Identifier VarTypes
+
+{- | A map that stores the type of the identifiers found
+ in the scope of a function or ghost function. Used in the analysis
+ performed after the parsing for validating the specification.
+-}
+type VarTypes = Map Identifier IdType

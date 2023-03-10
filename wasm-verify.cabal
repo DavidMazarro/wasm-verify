@@ -21,6 +21,7 @@ common common-extensions
     DeriveAnyClass
     DerivingStrategies
     GeneralizedNewtypeDeriving
+    NamedFieldPuns
     OverloadedStrings
     RecordWildCards
     TypeApplications
@@ -39,6 +40,7 @@ library
   build-depends:
     , base
     , bytestring
+    , containers
     , megaparsec
     , mtl
     , parser-combinators
