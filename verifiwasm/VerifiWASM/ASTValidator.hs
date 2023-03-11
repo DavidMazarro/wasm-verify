@@ -1,14 +1,27 @@
 module VerifiWASM.ASTValidator where
 
 import Control.Monad (when)
+import Control.Monad.State (get, put)
 import Data.Containers.ListUtils (nubOrd)
 import qualified Data.Map as M
+import Data.Maybe (fromJust, isNothing)
 import Data.Text (Text, pack)
 import Helpers.ANSI (bold)
 import VerifiWASM.LangTypes
 import VerifiWASM.VerifiWASM
 
-programTypes :: Program -> VerifiWASM FuncTypes
+validate :: Program -> VerifiWASM ()
+validate program = do
+  put =<< programTypes program
+  mapM_ (validateExpr . ghostExpr) (ghostFunctions program)
+
+{- | Gets a map with the types of all functions and
+ ghost functions that comprise the specification.
+ Each value of the map is in turn a map (one for each
+ function/ghost function) that associates all of the variables
+ within that function/ghost function its corresponding type.
+-}
+programTypes :: Program -> VerifiWASM FunTypes
 programTypes Program{functions, ghostFunctions} = do
   let functionNames = map funcName functions
   let ghostFunctionNames = map ghostName ghostFunctions
@@ -41,6 +54,10 @@ programTypes Program{functions, ghostFunctions} = do
       "A duplicate name for a function or ghost function was found. \n"
         <> "Make sure that all functions and ghost functions are named differently."
 
+{- | Returns a map with the types of all variables in
+ a function. Those would be: its arguments, its return values,
+ and the local variables defined in the specification.
+-}
 functionTypes :: Function -> VerifiWASM VarTypes
 functionTypes function = do
   let argNames = map fst (funcArgs function)
@@ -66,6 +83,9 @@ functionTypes function = do
         <> "Make sure that all arguments, return variables and local variables"
         <> " are named differently within a function declaration."
 
+{- | Returns a map with the types of all variables in a ghost function,
+ i.e. the type of its arguments.
+-}
 ghostFunctionTypes :: GhostFunction -> VerifiWASM VarTypes
 ghostFunctionTypes ghostFun = do
   let argNames = map fst (ghostArgs ghostFun)
@@ -87,8 +107,61 @@ ghostFunctionTypes ghostFun = do
  recursively validating the expressions inside.
 -}
 validateExpr :: Expr -> VerifiWASM ExprType
-validateExpr (FunCall _ _) =
-  undefined
+validateExpr (FunCall ghostFun args) = do
+  funTypes <- get
+
+  let mGhostFunTypes = M.lookup ghostFun funTypes
+
+  when (isNothing mGhostFunTypes) notFoundGhostFunErr
+
+  -- The use of 'fromJust' here is safe because we have
+  -- just checked whether the value is 'Nothing' or not
+  -- (and in that case, we throw a custom failure)
+  let ghostFunTypes = fromJust mGhostFunTypes
+
+  -- Right now we aren't differentiating between I32 or I64
+  -- in the arguments, so it suffices to check that the function
+  -- call is made with the same number of arguments and that
+  -- the types are all integer.
+  -- TODO: Confirm if we should keep track of I32 and I64 types.
+  argTypes <- mapM validateExpr args
+  let numArgs = length args
+  let numGhostFunTypes = length ghostFunTypes
+
+  when (numArgs /= numGhostFunTypes) $ badNumOfArgsErr numArgs numGhostFunTypes
+  when (any (/= ExprInt) argTypes) notAllIntegerArgsErr
+
+  return ExprInt
+  where
+    notFoundGhostFunErr =
+      failWithError $
+        Failure $
+          "Ghost function "
+            <> (bold . pack)
+              ghostFun
+            <> " could not be found in the VerifiWASM file "
+            <> "(this shouldn't have happened, report as an issue)."
+    badNumOfArgsErr receivedArgs actualArgs =
+      failWithError $
+        Failure $
+          "Ghost function "
+            <> (bold . pack)
+              ghostFun
+            <> " called with wrong number of arguments:\n"
+            <> "it received "
+            <> (bold . pack . show)
+              receivedArgs
+            <> " arguments when it should have received "
+            <> (bold . pack . show)
+              actualArgs
+    notAllIntegerArgsErr =
+      failWithError $
+        Failure $
+          "Ghost function "
+            <> (bold . pack)
+              ghostFun
+            <> " expects all arguments to be integers,"
+            <> " but it received an argument that is not an integer."
 validateExpr (IfThenElse ifExpr thenExpr elseExpr) = do
   ifType <- validateExpr ifExpr
 
@@ -223,6 +296,11 @@ validateBinary topExpr leftExpr rightExpr expectedType returnType = do
       BLess _ _ -> "<"
       BGreaterOrEq _ _ -> ">="
       BGreater _ _ -> ">"
+      IMinus _ _ -> "-"
+      IPlus _ _ -> "+"
+      IMult _ _ -> "*"
+      IDiv _ _ -> "/"
+      IMod _ _ -> "%"
       _ -> error "This shouldn't happen."
 
 validateSameType :: Expr -> Expr -> Expr -> VerifiWASM ExprType

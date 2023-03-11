@@ -151,7 +151,7 @@ type Identifier = String
  Since functions and ghost functions share a global namespace, they can be
  given a unique key which is its 'Identifier' without conflicts.
 -}
-type FuncTypes = Map Identifier VarTypes
+type FunTypes = Map Identifier VarTypes
 
 {- | A map that stores the type of the identifiers found
  in the scope of a function or ghost function. Used in the analysis

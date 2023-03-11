@@ -24,7 +24,7 @@ import VerifiWASM.LangTypes
  (functions, ghost functions and the variables inside them)
  after parsing, during the AST validation step.
 -}
-type VerifiWASM a = ExceptT Failure (StateT FuncTypes (Writer Builder)) a
+type VerifiWASM a = ExceptT Failure (StateT FunTypes (Writer Builder)) a
 
 {- | The error type for actions within 'VerifiWASM'.
  It's both used for silent logging and also derives 'Exception' for
