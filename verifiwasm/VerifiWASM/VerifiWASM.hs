@@ -24,7 +24,21 @@ import VerifiWASM.LangTypes
  (functions, ghost functions and the variables inside them)
  after parsing, during the AST validation step.
 -}
-type VerifiWASM a = ExceptT Failure (StateT FunTypes (Writer Builder)) a
+type VerifiWASM a = ExceptT Failure (StateT ContextState (Writer Builder)) a
+
+-- | The type that functions as a state in the 'VerifiWASM' monad.
+data ContextState = ContextState
+  { -- | Contains the types of all variables in functions/ghost functions
+    -- in a VerifiWASM file. Once initialised at the 
+    -- 'VerifiWASM.ASTValidator.validate' step, it doesn't change in the
+    -- rest of the execution of the 'VerifiWASM' monad.
+    globalTypes :: FunTypes,
+    -- | Serves as a local scope, containing the types of the current
+    -- function/ghost function that is being validated. It's used to
+    -- keep track of the parent function/ghost function when performing
+    -- the validation of expressions.
+    localTypes :: VarTypes
+  }
 
 {- | The error type for actions within 'VerifiWASM'.
  It's both used for silent logging and also derives 'Exception' for
@@ -34,13 +48,16 @@ newtype Failure = Failure {unFailure :: Text}
   deriving stock (Show)
   deriving anyclass (Exception)
 
+-- | Runner function for the 'VerifiWASM' monad.
 runVerifiWASM :: VerifiWASM a -> IO a
 runVerifiWASM action = do
-  let (res, logs) = runWriter $ evalStateT (runExceptT action) M.empty
+  let (res, logs) = runWriter $ evalStateT (runExceptT action) emptyContextState
   BS.putStr $ toLazyByteString logs
   case res of
     Right x -> pure x
     Left err -> error $ show $ unFailure err
+  where
+    emptyContextState = ContextState M.empty M.empty
 
 -- | Provides an easy action for logging within 'VerifiWASM' contexts.
 logError :: Failure -> VerifiWASM ()
