@@ -1,7 +1,7 @@
 module VerifiWASM.ASTValidator where
 
-import Control.Monad (when)
-import Control.Monad.State (get, put)
+import Control.Monad (void, when)
+import Control.Monad.State (get, put, gets)
 import Data.Containers.ListUtils (nubOrd)
 import qualified Data.Map as M
 import Data.Maybe (fromJust, isNothing)
@@ -12,8 +12,27 @@ import VerifiWASM.VerifiWASM
 
 validate :: Program -> VerifiWASM ()
 validate program = do
-  put =<< programTypes program
+  globalTypes <- programTypes program
+  put $ ContextState{globalTypes = globalTypes, localTypes = M.empty}
   mapM_ (validateExpr . ghostExpr) (ghostFunctions program)
+
+validateTermination :: Termination -> VerifiWASM ()
+validateTermination = undefined
+
+validateRequires :: Function -> VerifiWASM ()
+validateRequires function = do
+  _ <- lookupTypesInFunction $ funcName function
+  let (Requires expr) = requires . funcSpec $ function
+  void . validateExpr $ expr
+
+validateEnsures :: Function -> VerifiWASM ()
+validateEnsures function = do
+  _ <- lookupTypesInFunction $ funcName function
+  let (Ensures expr) = ensures . funcSpec $ function
+  void . validateExpr $ expr
+
+validateAsserts :: Function -> VerifiWASM ()
+validateAsserts = undefined
 
 {- | Gets a map with the types of all functions and
  ghost functions that comprise the specification.
@@ -108,16 +127,8 @@ ghostFunctionTypes ghostFun = do
 -}
 validateExpr :: Expr -> VerifiWASM ExprType
 validateExpr (FunCall ghostFun args) = do
-  funTypes <- get
-
-  let mGhostFunTypes = M.lookup ghostFun funTypes
-
-  when (isNothing mGhostFunTypes) notFoundGhostFunErr
-
-  -- The use of 'fromJust' here is safe because we have
-  -- just checked whether the value is 'Nothing' or not
-  -- (and in that case, we throw a custom failure)
-  let ghostFunTypes = fromJust mGhostFunTypes
+  ghostFunTypes <- lookupTypesInGhostFun ghostFun
+  _ <- gets localTypes
 
   -- Right now we aren't differentiating between I32 or I64
   -- in the arguments, so it suffices to check that the function
@@ -133,14 +144,6 @@ validateExpr (FunCall ghostFun args) = do
 
   return ExprInt
   where
-    notFoundGhostFunErr =
-      failWithError $
-        Failure $
-          "Ghost function "
-            <> (bold . pack)
-              ghostFun
-            <> " could not be found in the VerifiWASM file "
-            <> "(this shouldn't have happened, report as an issue)."
     badNumOfArgsErr receivedArgs actualArgs =
       failWithError $
         Failure $
@@ -346,3 +349,47 @@ ensureNoDuplicateNames names errMsg = do
 prettyType :: ExprType -> Text
 prettyType ExprBool = "boolean"
 prettyType ExprInt = "integer"
+
+lookupTypesInGhostFun :: Identifier -> VerifiWASM VarTypes
+lookupTypesInGhostFun ghostFun = do
+  contextState <- get
+
+  let mVarTypes = M.lookup ghostFun $ globalTypes contextState
+
+  when (isNothing mVarTypes) notFoundGhostFunErr
+
+  -- The use of 'fromJust' here is safe because we have
+  -- just checked whether the value is 'Nothing' or not
+  -- (and in that case, we throw a custom failure)
+  return $ fromJust mVarTypes
+  where
+    notFoundGhostFunErr =
+      failWithError $
+        Failure $
+          "Ghost function "
+            <> (bold . pack)
+              ghostFun
+            <> " could not be found in the VerifiWASM file "
+            <> "(this shouldn't have happened, report as an issue)."
+
+lookupTypesInFunction :: Identifier -> VerifiWASM VarTypes
+lookupTypesInFunction function = do
+  contextState <- get
+
+  let mVarTypes = M.lookup function $ globalTypes contextState
+
+  when (isNothing mVarTypes) notFoundFunErr
+
+  -- The use of 'fromJust' here is safe because we have
+  -- just checked whether the value is 'Nothing' or not
+  -- (and in that case, we throw a custom failure)
+  return $ fromJust mVarTypes
+  where
+    notFoundFunErr =
+      failWithError $
+        Failure $
+          "Function specification "
+            <> (bold . pack)
+              function
+            <> " could not be found in the VerifiWASM file "
+            <> "(this shouldn't have happened, report as an issue)."
