@@ -35,6 +35,7 @@ library
     VerifiWASM.LangTypes
     VerifiWASM.Parser
     VerifiWASM.VerifiWASM
+    WasmVerify.CFGs
     WasmVerify.ModuleLoader
 
   build-depends:
