@@ -29,7 +29,7 @@ type VerifiWASM a = ExceptT Failure (StateT ContextState (Writer Builder)) a
 -- | The type that functions as a state in the 'VerifiWASM' monad.
 data ContextState = ContextState
   { -- | Contains the types of all variables in functions/ghost functions
-    -- in a VerifiWASM file. Once initialised at the 
+    -- in a VerifiWASM file. Once initialised at the
     -- 'VerifiWASM.ASTValidator.validate' step, it doesn't change in the
     -- rest of the execution of the 'VerifiWASM' monad.
     globalTypes :: FunTypes,
@@ -37,7 +37,11 @@ data ContextState = ContextState
     -- function/ghost function that is being validated. It's used to
     -- keep track of the parent function/ghost function when performing
     -- the validation of expressions.
-    localTypes :: VarTypes
+    localTypes :: VarTypes,
+    -- | Contains the return types of all ghost functions in a VerifiWASM file.
+    -- Once initialised at the 'VerifiWASM.ASTValidator.validate' step,
+    -- it doesn't change in the rest of the execution of the 'VerifiWASM' monad.
+    ghostFunReturnTypes :: GhostFunReturnTypes
   }
 
 {- | The error type for actions within 'VerifiWASM'.
@@ -57,7 +61,7 @@ runVerifiWASM action = do
     Right x -> pure x
     Left err -> error $ show $ unFailure err
   where
-    emptyContextState = ContextState M.empty M.empty
+    emptyContextState = ContextState M.empty M.empty M.empty
 
 -- | Provides an easy action for logging within 'VerifiWASM' contexts.
 logError :: Failure -> VerifiWASM ()

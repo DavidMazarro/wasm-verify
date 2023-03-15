@@ -104,6 +104,9 @@ ghostFunctionParser = do
   keyword "ghostdef"
   name <- identifierParser' True
   args <- parens $ sepByCommas typedIdParser
+  spaceConsumer
+  keyword "returns"
+  returnType <- typeExprParser
   lexeme "{"
   (termination, requires) <- validateTerminationOrRequires name $ many terminationOrRequiresParser
   expr <- exprParser
@@ -114,7 +117,8 @@ ghostFunctionParser = do
         ghostArgs = args,
         ghostTermination = termination,
         ghostRequires = requires,
-        ghostExpr = expr
+        ghostExpr = expr,
+        ghostReturnType = returnType
       }
   where
     validateTerminationOrRequires :: Identifier -> Parser [Either Termination Requires] -> Parser (Termination, Requires)
@@ -297,6 +301,12 @@ numberParser = do
   num <- Lexer.decimal
   notFollowedBy (char '(' <|> char '_' <|> letterChar)
   return num
+
+typeExprParser :: Parser ExprType
+typeExprParser = do
+  (keyword "bool" >> return ExprBool)
+    <|> (keyword "integer" >> return ExprInt)
+
 
 typedIdParser :: Parser TypedIdentifier
 typedIdParser = do

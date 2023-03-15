@@ -1,7 +1,7 @@
 module VerifiWASM.ASTValidator where
 
 import Control.Monad (void, when)
-import Control.Monad.State (get, put, gets)
+import Control.Monad.State (get, gets, put)
 import Data.Containers.ListUtils (nubOrd)
 import qualified Data.Map as M
 import Data.Maybe (fromJust, isNothing)
@@ -13,114 +13,57 @@ import VerifiWASM.VerifiWASM
 validate :: Program -> VerifiWASM ()
 validate program = do
   globalTypes <- programTypes program
-  put $ ContextState{globalTypes = globalTypes, localTypes = M.empty}
-  mapM_ (validateExpr . ghostExpr) (ghostFunctions program)
+  put $
+    ContextState
+      { globalTypes = globalTypes,
+        localTypes = M.empty,
+        ghostFunReturnTypes = ghostFunReturnTypes
+      }
+  mapM_ validateGhostFun (ghostFunctions program)
+  mapM_ validateFunction (functions program)
+  where
+    ghostFunReturnTypes =
+      M.fromList $
+        map (\ghostFun -> (ghostName ghostFun, ghostReturnType ghostFun)) $
+          ghostFunctions program
 
-validateTermination :: Termination -> VerifiWASM ()
-validateTermination = undefined
+validateFunction :: Function -> VerifiWASM ()
+validateFunction function = do
+  -- Sets the local context
+  types <- lookupTypesInFunction $ funcName function
+  ContextState{..} <- get
+  put $ ContextState{globalTypes, localTypes = types, ghostFunReturnTypes}
 
-validateRequires :: Function -> VerifiWASM ()
-validateRequires function = do
-  _ <- lookupTypesInFunction $ funcName function
-  let (Requires expr) = requires . funcSpec $ function
+  validateRequires (funcName function) (requires . funcSpec $ function)
+  validateEnsures (funcName function) (ensures . funcSpec $ function)
+  mapM_ (validateAsserts . funcName $ function) $ asserts . funcSpec $ function
+
+validateGhostFun :: GhostFunction -> VerifiWASM ()
+validateGhostFun ghostFun = do
+  -- Sets the local context
+  types <- lookupTypesInGhostFun $ ghostName ghostFun
+  ContextState{..} <- get
+  put $ ContextState{globalTypes, localTypes = types, ghostFunReturnTypes}
+
+  void . validateExpr . ghostExpr $ ghostFun
+  validateTermination (ghostName ghostFun) (ghostTermination ghostFun)
+  validateRequires (ghostName ghostFun) (ghostRequires ghostFun)
+
+validateTermination :: Identifier -> Termination -> VerifiWASM ()
+validateTermination = undefined -- TODO
+
+validateRequires :: Identifier -> Requires -> VerifiWASM ()
+validateRequires name (Requires expr) = do
+  _ <- lookupTypesInFunction name
   void . validateExpr $ expr
 
-validateEnsures :: Function -> VerifiWASM ()
-validateEnsures function = do
-  _ <- lookupTypesInFunction $ funcName function
-  let (Ensures expr) = ensures . funcSpec $ function
+validateEnsures :: Identifier -> Ensures -> VerifiWASM ()
+validateEnsures name (Ensures expr) = do
+  _ <- lookupTypesInFunction name
   void . validateExpr $ expr
 
-validateAsserts :: Function -> VerifiWASM ()
+validateAsserts :: Identifier -> Assert -> VerifiWASM ()
 validateAsserts = undefined
-
-{- | Gets a map with the types of all functions and
- ghost functions that comprise the specification.
- Each value of the map is in turn a map (one for each
- function/ghost function) that associates all of the variables
- within that function/ghost function its corresponding type.
--}
-programTypes :: Program -> VerifiWASM FunTypes
-programTypes Program{functions, ghostFunctions} = do
-  let functionNames = map funcName functions
-  let ghostFunctionNames = map ghostName ghostFunctions
-  let allNames = functionNames ++ ghostFunctionNames
-
-  -- Ensuring that there are no duplicate function/ghost function
-  -- names allows us to perform union of the VarTypes safely
-  -- since there will be no collisions.
-  ensureNoDuplicateNames allNames errMsgDups
-
-  functionVarTypes <-
-    mapM
-      ( \function -> do
-          funTypes <- functionTypes function
-          return $ M.singleton (funcName function) funTypes
-      )
-      functions
-  ghostFunctionVarTypes <-
-    mapM
-      ( \ghostFun -> do
-          ghostFunTypes <- ghostFunctionTypes ghostFun
-          return $ M.singleton (ghostName ghostFun) ghostFunTypes
-      )
-      ghostFunctions
-  let allVarTypes = functionVarTypes ++ ghostFunctionVarTypes
-
-  return $ foldl M.union M.empty allVarTypes
-  where
-    errMsgDups =
-      "A duplicate name for a function or ghost function was found. \n"
-        <> "Make sure that all functions and ghost functions are named differently."
-
-{- | Returns a map with the types of all variables in
- a function. Those would be: its arguments, its return values,
- and the local variables defined in the specification.
--}
-functionTypes :: Function -> VerifiWASM VarTypes
-functionTypes function = do
-  let argNames = map fst (funcArgs function)
-  let returnNames = map fst (funcReturns function)
-  let localDecls = concatMap localVars $ locals $ funcSpec function
-  let localNames = map fst localDecls
-  let allNames = argNames ++ returnNames ++ localNames
-
-  -- Ensuring that there are no duplicate argument/return/local
-  -- names to avoid identifier collisions.
-  ensureNoDuplicateNames allNames errMsgDups
-
-  return $
-    M.fromList (funcArgs function)
-      `M.union` M.fromList (funcReturns function)
-      `M.union` M.fromList localDecls
-  where
-    errMsgDups =
-      "Some arguments, return variables or local variables"
-        <> " with duplicate names were found in function: "
-        <> (bold . pack) (funcName function)
-        <> "\n"
-        <> "Make sure that all arguments, return variables and local variables"
-        <> " are named differently within a function declaration."
-
-{- | Returns a map with the types of all variables in a ghost function,
- i.e. the type of its arguments.
--}
-ghostFunctionTypes :: GhostFunction -> VerifiWASM VarTypes
-ghostFunctionTypes ghostFun = do
-  let argNames = map fst (ghostArgs ghostFun)
-
-  -- Ensuring that there are no duplicate argument
-  -- names to avoid identifier collisions.
-  ensureNoDuplicateNames argNames errMsgDups
-
-  return $ M.fromList $ ghostArgs ghostFun
-  where
-    errMsgDups =
-      "Some arguments with duplicate names were found in ghost function: "
-        <> (bold . pack) (ghostName ghostFun)
-        <> "\n"
-        <> "Make sure that all arguments are named differently"
-        <> " within a ghost function declaration."
 
 {- | Validates an expression and returns its type,
  recursively validating the expressions inside.
@@ -128,7 +71,8 @@ ghostFunctionTypes ghostFun = do
 validateExpr :: Expr -> VerifiWASM ExprType
 validateExpr (FunCall ghostFun args) = do
   ghostFunTypes <- lookupTypesInGhostFun ghostFun
-  _ <- gets localTypes
+  _localTypes <- gets localTypes
+  _ghostFunReturnTypes <- gets ghostFunReturnTypes
 
   -- Right now we aren't differentiating between I32 or I64
   -- in the arguments, so it suffices to check that the function
@@ -140,9 +84,11 @@ validateExpr (FunCall ghostFun args) = do
   let numGhostFunTypes = length ghostFunTypes
 
   when (numArgs /= numGhostFunTypes) $ badNumOfArgsErr numArgs numGhostFunTypes
-  when (any (/= ExprInt) argTypes) notAllIntegerArgsErr
+  when (any (/= ExprInt) argTypes) notAllIntegerArgsErr -- TODO: Shouldn't we allow boolean values? For predicates
 
-  return ExprInt
+  -- TODO: 
+
+  return ExprInt -- TODO: replace with proper type from ghost function
   where
     badNumOfArgsErr receivedArgs actualArgs =
       failWithError $
@@ -220,7 +166,7 @@ validateExpr topExpr@(BGreaterOrEq leftExpr rightExpr) =
 validateExpr topExpr@(BGreater leftExpr rightExpr) =
   validateBinary topExpr leftExpr rightExpr ExprInt ExprBool
 validateExpr (IVar _) =
-  return ExprInt
+  undefined -- TODO
 validateExpr (IInt _) =
   return ExprInt
 validateExpr topExpr@(INeg subExpr) =
@@ -336,6 +282,96 @@ validateSameType topExpr leftExpr rightExpr = do
       _ -> error "This shouldn't happen."
 
 ----------- Helper functions -----------
+
+-- * Helper functions
+
+{- | Gets a map with the types of all functions and
+ ghost functions that comprise the specification.
+ Each value of the map is in turn a map (one for each
+ function/ghost function) that associates all of the variables
+ within that function/ghost function its corresponding type.
+-}
+programTypes :: Program -> VerifiWASM FunTypes
+programTypes Program{functions, ghostFunctions} = do
+  let functionNames = map funcName functions
+  let ghostFunctionNames = map ghostName ghostFunctions
+  let allNames = functionNames ++ ghostFunctionNames
+
+  -- Ensuring that there are no duplicate function/ghost function
+  -- names allows us to perform union of the VarTypes safely
+  -- since there will be no collisions.
+  ensureNoDuplicateNames allNames errMsgDups
+
+  functionVarTypes <-
+    mapM
+      ( \function -> do
+          funTypes <- functionTypes function
+          return $ M.singleton (funcName function) funTypes
+      )
+      functions
+  ghostFunctionVarTypes <-
+    mapM
+      ( \ghostFun -> do
+          ghostFunTypes <- ghostFunctionTypes ghostFun
+          return $ M.singleton (ghostName ghostFun) ghostFunTypes
+      )
+      ghostFunctions
+  let allVarTypes = functionVarTypes ++ ghostFunctionVarTypes
+
+  return $ foldl M.union M.empty allVarTypes
+  where
+    errMsgDups =
+      "A duplicate name for a function or ghost function was found. \n"
+        <> "Make sure that all functions and ghost functions are named differently."
+
+{- | Returns a map with the types of all variables in
+ a function. Those would be: its arguments, its return values,
+ and the local variables defined in the specification.
+-}
+functionTypes :: Function -> VerifiWASM VarTypes
+functionTypes function = do
+  let argNames = map fst (funcArgs function)
+  let returnNames = map fst (funcReturns function)
+  let localDecls = concatMap localVars $ locals $ funcSpec function
+  let localNames = map fst localDecls
+  let allNames = argNames ++ returnNames ++ localNames
+
+  -- Ensuring that there are no duplicate argument/return/local
+  -- names to avoid identifier collisions.
+  ensureNoDuplicateNames allNames errMsgDups
+
+  return $
+    M.fromList (funcArgs function)
+      `M.union` M.fromList (funcReturns function)
+      `M.union` M.fromList localDecls
+  where
+    errMsgDups =
+      "Some arguments, return variables or local variables"
+        <> " with duplicate names were found in function: "
+        <> (bold . pack) (funcName function)
+        <> "\n"
+        <> "Make sure that all arguments, return variables and local variables"
+        <> " are named differently within a function declaration."
+
+{- | Returns a map with the types of all variables in a ghost function,
+ i.e. the type of its arguments.
+-}
+ghostFunctionTypes :: GhostFunction -> VerifiWASM VarTypes
+ghostFunctionTypes ghostFun = do
+  let argNames = map fst (ghostArgs ghostFun)
+
+  -- Ensuring that there are no duplicate argument
+  -- names to avoid identifier collisions.
+  ensureNoDuplicateNames argNames errMsgDups
+
+  return $ M.fromList $ ghostArgs ghostFun
+  where
+    errMsgDups =
+      "Some arguments with duplicate names were found in ghost function: "
+        <> (bold . pack) (ghostName ghostFun)
+        <> "\n"
+        <> "Make sure that all arguments are named differently"
+        <> " within a ghost function declaration."
 
 ensureNoDuplicateNames :: [Identifier] -> Text -> VerifiWASM ()
 ensureNoDuplicateNames names errMsg = do

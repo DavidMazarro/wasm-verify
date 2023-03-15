@@ -33,7 +33,8 @@ data GhostFunction = GhostFunction
     ghostArgs :: [TypedIdentifier],
     ghostTermination :: Termination,
     ghostRequires :: Requires,
-    ghostExpr :: Expr
+    ghostExpr :: Expr,
+    ghostReturnType :: ExprType
   }
   deriving (Show)
 
@@ -146,12 +147,18 @@ data IdType = I32 | I64
 type Identifier = String
 
 {- | A map that stores all of the type scopes (see 'VarTypes')
- associated with the functions and ghost functions in a specification.
+ associated with the functions and ghost functions in a VerifiWASM file.
  Used in the analysis performed after the parsing for validating the specification.
  Since functions and ghost functions share a global namespace, they can be
  given a unique key which is its 'Identifier' without conflicts.
 -}
 type FunTypes = Map Identifier VarTypes
+
+{- | A map that stores the returned types of ghost functions
+ in a VerifiWASM file. Used in the analysis performed
+ after the parsing for validating the specification.
+-}
+type GhostFunReturnTypes = Map Identifier ExprType
 
 {- | A map that stores the type of the identifiers found
  in the scope of a function or ghost function. Used in the analysis
