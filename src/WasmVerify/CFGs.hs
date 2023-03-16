@@ -139,18 +139,21 @@ toCFG (instruction : restOfInstructions) labelStack = do
         `Set.union` set2
         `Set.union` Set.fromList
           [Edge final Empty initial | final <- Set.toList finals]
-toCFG _ _ = undefined
 
 freshLabel :: State BlockLabel BlockLabel
 freshLabel = modify (+ 1) >> get
 
 -- * Helper functions
 
--- 'naturalToInt' was introduced in GHC 8.10.5 (August 2021),
--- which is a bit too recent, so this macro checks if the version
--- of the base library is older than that and defines the function.
-#if MIN_VERSION_base(4,14,3)
-#else
+-- 'naturalToInt' was only available in the base library
+-- from version 4.12.0 up to 4.14.3, for some reason
+-- unbeknownst to me. So this piece here defines the function
+-- when the system's GHC base version is outside that range.
+#if MIN_VERSION_base(4,15,0)
+naturalToInt :: Natural -> Int
+naturalToInt = fromInteger . naturalToInteger
+#elif MIN_VERSION_base(4,12,0)
+#else 
 naturalToInt :: Natural -> Int
 naturalToInt = fromInteger . naturalToInteger
 #endif
