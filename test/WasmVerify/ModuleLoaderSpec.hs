@@ -12,7 +12,7 @@ import qualified Language.Wasm.Validate as Wasm
 import Path
 import System.Directory
 import Test.Hspec
-import WasmVerify.ModuleLoader
+import WasmVerify
 
 spec :: Spec
 spec = do

@@ -20,7 +20,7 @@ import Paths_wasm_verify (version)
 import System.Process (readProcessWithExitCode)
 import Text.Pretty.Simple (pPrint)
 import VerifiWASM.Parser (parseVerifiWASMFile)
-import WasmVerify.ModuleLoader (loadModuleFromFile)
+import WasmVerify
 
 ----------------------------------------------------------------------------
 
@@ -85,6 +85,7 @@ main = do
     ".wasm" -> do
       wasmModule <- loadModuleFromFile filepath
       when debugWasmADT $ pPrint wasmModule
+      when debugWasmADT $ pPrint $ wasmModuleToCFG wasmModule
     _ -> do
       fail "The file extension must be .wasm or .smt2"
 

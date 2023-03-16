@@ -35,8 +35,8 @@ library
     VerifiWASM.LangTypes
     VerifiWASM.Parser
     VerifiWASM.VerifiWASM
+    WasmVerify
     WasmVerify.CFGs
-    WasmVerify.ModuleLoader
 
   build-depends:
     , base
@@ -80,9 +80,7 @@ test-suite test
   type:               exitcode-stdio-1.0
   hs-source-dirs:     test
   main-is:            Spec.hs
-  other-modules:
-    WasmVerify.ModuleLoaderSpec
-
+  other-modules:      WasmVerify.ModuleLoaderSpec
   build-depends:
     , base
     , bytestring
