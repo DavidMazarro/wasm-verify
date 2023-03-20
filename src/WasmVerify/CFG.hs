@@ -1,7 +1,7 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE DerivingStrategies #-}
 
-module WasmVerify.CFGs where
+module WasmVerify.CFG where
 
 import Control.Monad.State (State, evalState, gets, modify, void)
 import Data.Bifunctor (first, second)
@@ -89,7 +89,7 @@ toCFGFunction (Wasm.Function _ _ functionBody) = do
   newLabel <- freshLabel
   void $ pushToLabelStack newLabel
   (bodyCFG, bodyInitial, bodyFinals) <- toCFG $ indexInstructions 1 functionBody
-  let blocks = blockSet bodyCFG `Set.union` Set.singleton (Node (newLabel, []))
+  let blocks = Node (newLabel, []) `Set.insert` nodeSet bodyCFG
   let edges = edgesFromFinals (edgeSet bodyCFG) newLabel bodyFinals
   return (CFG (blocks, edges), bodyInitial, Set.singleton newLabel)
   where
@@ -122,27 +122,27 @@ toCFG [blockInstr@(indexInstr, Wasm.Block _ blockBody)] = do
   newLabel' <- freshLabel
   void $ pushToLabelStack newLabel'
   (bodyCFG, bodyInitial, bodyFinals) <- toCFG $ indexInstructions (indexInstr + 1) blockBody
-  let blocks = blockSet bodyCFG `Set.union` Set.fromList [Node (newLabel, [blockInstr]), Node (newLabel', [])]
+  let blocks = nodeSet bodyCFG `Set.union` Set.fromList [Node (newLabel, [blockInstr]), Node (newLabel', [])]
   let edges = edgeUnion (edgeSet bodyCFG) bodyInitial newLabel newLabel' bodyFinals
   return (CFG (blocks, edges), newLabel, Set.singleton newLabel')
   where
     edgeUnion set initial l l' finals =
-      set
-        `Set.union` Set.singleton (Edge l Empty initial)
+      Edge l Empty initial
+        `Set.insert` set
         `Set.union` Set.fromList
           [Edge final Empty l' | final <- Set.toList finals]
 toCFG [loopInstr@(indexInstr, Wasm.Loop _ loopBody)] = do
   newLabel <- freshLabel
   void $ pushToLabelStack newLabel
   (bodyCFG, bodyInitial, bodyFinals) <- toCFG $ indexInstructions (indexInstr + 1) loopBody
-  let blocks = blockSet bodyCFG `Set.union` Set.singleton (Node (newLabel, [loopInstr]))
-  let edges = edgeSet bodyCFG `Set.union` Set.singleton (Edge newLabel Empty bodyInitial)
+  let blocks = Node (newLabel, [loopInstr]) `Set.insert` nodeSet bodyCFG
+  let edges = Edge newLabel Empty bodyInitial `Set.insert` edgeSet bodyCFG
   return (CFG (blocks, edges), newLabel, bodyFinals)
 toCFG [ifInstr@(indexInstr, Wasm.If _ ifBody elseBody)] = do
   newLabel <- freshLabel
   (ifCFG, ifInitial, ifFinals) <- toCFG $ indexInstructions (indexInstr + 1) ifBody
   (elseCFG, elseInitial, elseFinals) <- toCFG $ indexInstructions (indexInstr + 1) elseBody
-  let blocks = blockSet ifCFG `Set.union` blockSet elseCFG `Set.union` Set.singleton (Node (newLabel, [ifInstr]))
+  let blocks = Node (newLabel, [ifInstr]) `Set.insert` nodeSet elseCFG `Set.union` nodeSet ifCFG
   let edges = edgeUnion (edgeSet ifCFG) (edgeSet elseCFG) ifInitial elseInitial newLabel
   return (CFG (blocks, edges), newLabel, ifFinals `Set.union` elseFinals)
   where
@@ -174,12 +174,11 @@ toCFG [brTableInstr@(_, Wasm.BrTable tableCases defaultCase)] = do
   return (CFG (blocks, edges), newLabel, Set.empty)
   where
     edgesFromTableCases cases label stackLabels caseDefault =
-      Set.fromList
-        [ Edge label (Eq i) (stackLabels !! naturalToInt (cases !! i))
-          | i <- [0 .. length cases - 1]
-        ]
-        `Set.union` Set.singleton
-          (Edge label (GreaterEq (length cases)) (stackLabels !! naturalToInt caseDefault))
+      Edge label (GreaterEq (length cases)) (stackLabels !! naturalToInt caseDefault)
+        `Set.insert` Set.fromList
+          [ Edge label (Eq i) (stackLabels !! naturalToInt (cases !! i))
+            | i <- [0 .. length cases - 1]
+          ]
 toCFG [returnInstr@(_, Wasm.Return)] = do
   labelStack <- gets snd
   void . traceShow labelStack $ return ()
@@ -194,7 +193,7 @@ toCFG [instruction] = do
 toCFG (instruction : restOfInstructions) = do
   (instructionCFG, instructionInitial, instructionFinals) <- toCFG [instruction]
   (restCFG, restInitials, restFinals) <- toCFG restOfInstructions
-  let blocks = blockSet instructionCFG `Set.union` blockSet restCFG
+  let blocks = nodeSet instructionCFG `Set.union` nodeSet restCFG
   let edges = edgeUnion (edgeSet instructionCFG) (edgeSet restCFG) restInitials instructionFinals
   return (CFG (blocks, edges), instructionInitial, restFinals)
   where
@@ -214,6 +213,12 @@ pushToLabelStack :: NodeLabel -> State LabelState [NodeLabel]
 pushToLabelStack label = modify (second (label :)) >> gets snd
 
 -- * Helper functions
+
+nodeLabel :: Node -> NodeLabel
+nodeLabel (Node (label, _)) = label
+
+nodeInstructions :: Node -> [IndexedInstruction]
+nodeInstructions (Node (_, instructions)) = instructions
 
 -- 'naturalToInt' was only available in the base library
 -- from version 4.12.0 up to 4.14.3, for some reason
@@ -250,8 +255,8 @@ addInstructionIndex blockInstr@(Wasm.If _ ifBody elseBody) index =
   (index + 1 + length ifBody + length elseBody, (index, blockInstr))
 addInstructionIndex instruction index = (index + 1, (index, instruction))
 
-blockSet :: CFG -> Set Node
-blockSet = fst . cfg
+nodeSet :: CFG -> Set Node
+nodeSet = fst . cfg
 
 edgeSet :: CFG -> Set Edge
 edgeSet = snd . cfg

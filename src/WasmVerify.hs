@@ -5,7 +5,7 @@ import qualified Data.ByteString as BS (readFile)
 import qualified Language.Wasm as Wasm
 import qualified Language.Wasm.Structure as Wasm
 import Path
-import WasmVerify.CFGs
+import WasmVerify.CFG
 
 ----------------------------------------------------------------------------
 

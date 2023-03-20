@@ -36,7 +36,7 @@ library
     VerifiWASM.Parser
     VerifiWASM.VerifiWASM
     WasmVerify
-    WasmVerify.CFGs
+    WasmVerify.CFG
 
   build-depends:
     , base
