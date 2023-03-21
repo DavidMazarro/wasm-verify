@@ -37,6 +37,8 @@ library
     VerifiWASM.VerifiWASM
     WasmVerify
     WasmVerify.CFG
+    WasmVerify.CFG.Fusion
+    WasmVerify.CFG.Types
 
   build-depends:
     , base
