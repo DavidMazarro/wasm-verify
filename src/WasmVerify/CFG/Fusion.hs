@@ -30,17 +30,6 @@ simplifyStepCFG cfgInitialsFinals =
   maybe cfgInitialsFinals (fusionNodesInCFG cfgInitialsFinals) $
     fusionableNodes cfgInitialsFinals
 
-{- | Tries to find a pair of fusionable nodes in the provided 'CFG'.
- If there are no two fusionable nodes in the 'CFG',
- the function returns 'Nothing'.
--}
-fusionableNodes ::
-  (CFG, NodeLabel, Set NodeLabel) ->
-  Maybe (Node, Node)
-fusionableNodes (cfg@(CFG (nodes, _)), initialLabel, _) =
-  (find . uncurry) (areFusionableInCFG cfg initialLabel) $
-    nodes `Set.cartesianProduct` nodes
-
 -- | Performs the fusion of a pair of fusionable nodes in a 'CFG'.
 fusionNodesInCFG ::
   (CFG, NodeLabel, Set NodeLabel) ->
@@ -70,6 +59,20 @@ fusionNodesInCFG cfgInitialsFinals (node1, node2) =
         then Set.insert nodeLabel1 . Set.delete nodeLabel2 $ prevFinals
         else prevFinals
 
+{- | Tries to find a pair of fusionable nodes in the provided 'CFG'.
+ If there are no two fusionable nodes in the 'CFG',
+ the function returns 'Nothing'.
+-}
+fusionableNodes ::
+  (CFG, NodeLabel, Set NodeLabel) ->
+  Maybe (Node, Node)
+fusionableNodes (cfg@(CFG (nodes, _)), initialLabel, _) =
+  (find . uncurry) (areFusionableInCFG cfg initialLabel) $
+    nodes `Set.cartesianProduct` nodes
+
+{- | Returns 'True' if a pair of nodes can be fusioned
+ in a 'CFG' (with an initial label), and 'False' otherwise.
+-}
 areFusionableInCFG :: CFG -> NodeLabel -> Node -> Node -> Bool
 areFusionableInCFG cfg initialLabel node1 node2 =
   nodeLabel node2 /= initialLabel
@@ -80,14 +83,16 @@ areFusionableInCFG cfg initialLabel node1 node2 =
     nodeLabel2 = nodeLabel node2
     edgeBetweenNodes = Set.singleton (Edge nodeLabel1 Empty nodeLabel2)
 
-{- | Gets the set of edges that go from the specified
+-- * Helper functions
+
+{- | Gets the set of edges that go __from__ the specified
  'Node' to other 'Node's in the 'CFG'.
 -}
 edgesFromNode :: Node -> CFG -> Set Edge
 edgesFromNode (Node (label, _)) cfg =
   Set.filter ((== label) . from) $ edgeSet cfg
 
-{- | Gets the set of edges that go to the specified
+{- | Gets the set of edges that go __to__ the specified
  'Node' from other 'Node's in the 'CFG'.
 -}
 edgesToNode :: Node -> CFG -> Set Edge

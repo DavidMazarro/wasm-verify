@@ -47,32 +47,51 @@ data Edge = Edge
   }
   deriving (Eq, Ord, Show)
 
+{- | A datatype used in 'Edge's for encoding the condition that
+must hold for the execution to go from one 'Node' to another 'Node'.
+ It can be understood similarly to a labeled transition
+ in a [finite-state machine](https://en.wikipedia.org/wiki/Finite-state_machine).
+-}
 data Annotation
-  = Empty
-  | Eq Int
-  | NotEq Int
-  | GreaterEq Int
+  = -- | The edge is __always__ traversed.
+    Empty
+  | -- | The edge is traversed when the value at the top
+    -- of the WebAssembly program stack is __equal__ to the given 'Int'.
+    Eq Int
+  | -- | The edge is traversed when the value at the top
+    -- of the WebAssembly program stack is __different__ to the given 'Int'.
+    NotEq Int
+  | -- | The edge is traversed when the value at the top
+    -- of the WebAssembly program stack is __greater or equal__ to the given 'Int'.
+    GreaterEq Int
   deriving (Eq, Ord, Show)
 
+{- | A type alias for 'Int's, used to tag nodes in a 'CFG'
+ and serve as the identifier for a given node.
+-}
 type NodeLabel = Int
 
-{- | Type alias for the state used in the 'toCFG' function.
+{- | Type alias for the state used in the 'WasmVerify.CFG.toCFG' function.
  The first value of the tuple is the last used 'NodeLabel'
- for a 'Node' and the second value is a list of 'NodeLabel's''
+ for a 'Node' and the second value is a list of 'NodeLabel's
  that serves as a "stack" of nesting level in the function.
 -}
 type LabelState = (NodeLabel, [NodeLabel])
 
 -- * Helper functions
 
+-- | Returns the 'NodeLabel' for the provided 'Node'.
 nodeLabel :: Node -> NodeLabel
 nodeLabel (Node (label, _)) = label
 
+-- | Returns the WebAssembly instructions contained in the provided 'Node'.
 nodeInstructions :: Node -> [IndexedInstruction]
 nodeInstructions (Node (_, instructions)) = instructions
 
+-- | Returns the 'Set' of 'Node's in a 'CFG'.
 nodeSet :: CFG -> Set Node
 nodeSet = fst . cfg
 
+-- | Returns the 'Set' of 'Edge's in a 'CFG'.
 edgeSet :: CFG -> Set Edge
 edgeSet = snd . cfg
