@@ -2,11 +2,12 @@ module WasmVerify where
 
 import Control.Exception.Safe (throwString)
 import qualified Data.ByteString as BS (readFile)
+import Data.Set (Set)
 import qualified Language.Wasm as Wasm
 import qualified Language.Wasm.Structure as Wasm
 import Path
 import WasmVerify.CFG (functionToCFG)
-import WasmVerify.CFG.Types (CFG)
+import WasmVerify.CFG.Types (CFG, NodeLabel)
 
 ----------------------------------------------------------------------------
 
@@ -27,5 +28,5 @@ loadModuleFromFile filepath = do
 {- | Transforms the functions in a WebAssembly module into
  the Control Flow Graphs that model their execution flow.
 -}
-wasmModuleToCFG :: Wasm.ValidModule -> [CFG]
+wasmModuleToCFG :: Wasm.ValidModule -> [(CFG, NodeLabel, Set NodeLabel)]
 wasmModuleToCFG = map functionToCFG . Wasm.functions . Wasm.getModule

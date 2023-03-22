@@ -80,20 +80,6 @@ areFusionableInCFG cfg initialLabel node1 node2 =
     nodeLabel2 = nodeLabel node2
     edgeBetweenNodes = Set.singleton (Edge nodeLabel1 Empty nodeLabel2)
 
-{- | Taking the following definition of adjacency:
- "a node X in a CFG is adjacent to a node Y if there
- is an edge that goes from X to Y".
--}
-
--- adjacents :: CFG -> Node -> Set Node
--- adjacents cfg (Node (label, _)) =
---   nodesFromNodeLabels adjacentNodeLabels
---   where
---     nodesFromNodeLabels nodeLabels =
---       Set.filter ((`Set.member` nodeLabels) . fst . node) $ nodeSet cfg
---     adjacentNodeLabels =
---       Set.map to . Set.filter ((== label) . from) $ edgeSet cfg
-
 {- | Gets the set of edges that go from the specified
  'Node' to other 'Node's in the 'CFG'.
 -}

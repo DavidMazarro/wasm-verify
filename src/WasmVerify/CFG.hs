@@ -5,20 +5,36 @@ module WasmVerify.CFG where
 
 import Control.Monad.State (State, evalState, gets, modify, void)
 import Data.Bifunctor (first, second)
+import Data.Graph (SCC, stronglyConnComp)
 import Data.Set (Set)
 import qualified Data.Set as Set
+import Debug.Trace (traceShow)
 import GHC.Natural
 import qualified Language.Wasm.Structure as Wasm
 import WasmVerify.CFG.Fusion (simplifyCFG)
 import WasmVerify.CFG.Types
 
--- import Data.Graph (stronglyConnComp)
+{- | Turns a WebAssembly function into its associated 'CFG',
+ along with the initial node (starting point of the execution)
+ and the set of final nodes (possible ending points of execution).
+-}
+functionToCFG :: Wasm.Function -> (CFG, NodeLabel, Set NodeLabel)
+functionToCFG function = evalState (simplifyCFG <$> toCFGFunction function) (0, [])
 
--- | Turns a WebAssembly function into its associated 'CFG'.
-functionToCFG :: Wasm.Function -> CFG
-functionToCFG function = resultingCFG
-  where
-    (resultingCFG, _, _) = evalState (simplifyCFG <$> toCFGFunction function) (0, [])
+{- | Returns the list of strongly connected components in a
+ function's 'CFG'. Used for generating verification conditions.
+-}
+stronglyConnCompCFG :: CFG -> [SCC Node]
+stronglyConnCompCFG cfg =
+  stronglyConnComp $
+    map
+      ( \node ->
+          ( node,
+            nodeLabel node,
+            traceShow ((map nodeLabel . Set.toList) $ adjacents cfg node) ((map nodeLabel . Set.toList) $ adjacents cfg node)
+          )
+      )
+      (Set.toList $ nodeSet cfg)
 
 {- | This function takes a WebAssembly function,
  calls 'toCFG' and adds a final node to the resulting CFG
@@ -151,6 +167,10 @@ toCFG (instruction : restOfInstructions) = do
 freshLabel :: State LabelState NodeLabel
 freshLabel = modify (first (+ 1)) >> gets fst
 
+{- | Pushes a 'NodeLabel' to the "top" of the node label stack
+ (the beginning of the list). It represents the deepest
+ nesting level reached so far during the conversion to a 'CFG'.
+-}
 pushToLabelStack :: NodeLabel -> State LabelState [NodeLabel]
 pushToLabelStack label = modify (second (label :)) >> gets snd
 
@@ -169,6 +189,20 @@ naturalToInt :: Natural -> Int
 naturalToInt = fromInteger . naturalToInteger
 #endif
 
+{- | It returns the set of nodes adjacent to a given one,
+ taking the following definition of adjacency:
+ "a node Y in a CFG is adjacent to a node X if there
+ is an edge that goes from X to Y".
+-}
+adjacents :: CFG -> Node -> Set Node
+adjacents cfg (Node (label, _)) =
+  nodesFromNodeLabels adjacentNodeLabels
+  where
+    nodesFromNodeLabels nodeLabels =
+      Set.filter ((`Set.member` nodeLabels) . fst . node) $ nodeSet cfg
+    adjacentNodeLabels =
+      Set.map to . Set.filter ((== label) . from) $ edgeSet cfg
+
 {- | Adds an index to each instruction of
  a list coming from a 'Wasm.Function' body.
  Used to keep track of the index of an instruction to check
@@ -182,6 +216,13 @@ indexInstructions startIndex (instruction : restOfInstructions) =
   let (nextIndex, indexedInstr) = addInstructionIndex instruction startIndex
    in indexedInstr : (indexInstructions nextIndex restOfInstructions)
 
+{- | Adds an index to a given instruction, returning
+ the indexed instruction and the next index that should
+ be used. For control instructions with a body
+ ('Wasm.Block', 'Wasm.Loop', 'Wasm.If') it increases
+ the index by the number of instructions that appear
+ in the body.
+-}
 addInstructionIndex :: Wasm.Instruction Natural -> Int -> (Int, IndexedInstruction)
 addInstructionIndex blockInstr@(Wasm.Block _ blockBody) index =
   (index + 1 + length blockBody, (index, blockInstr))
