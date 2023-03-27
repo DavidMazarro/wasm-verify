@@ -33,11 +33,11 @@ data ContextState = ContextState
     -- 'VerifiWASM.ASTValidator.validate' step, it doesn't change in the
     -- rest of the execution of the 'VerifiWASM' monad.
     globalTypes :: FunTypes,
-    -- | Serves as a local scope, containing the types of the current
-    -- function/ghost function that is being validated. It's used to
+    -- | Serves as a local scope, containing the tuple of the name and the types
+    -- of the current function/ghost function that is being validated. It's used to
     -- keep track of the parent function/ghost function when performing
     -- the validation of expressions.
-    localTypes :: VarTypes,
+    localTypes :: (Identifier, VarTypes),
     -- | Contains the return types of all ghost functions in a VerifiWASM file.
     -- Once initialised at the 'VerifiWASM.ASTValidator.validate' step,
     -- it doesn't change in the rest of the execution of the 'VerifiWASM' monad.
@@ -61,7 +61,7 @@ runVerifiWASM action = do
     Right x -> pure x
     Left err -> error $ show $ unFailure err
   where
-    emptyContextState = ContextState M.empty M.empty M.empty
+    emptyContextState = ContextState M.empty ("", M.empty) M.empty
 
 -- | Provides an easy action for logging within 'VerifiWASM' contexts.
 logError :: Failure -> VerifiWASM ()

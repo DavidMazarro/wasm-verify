@@ -8,7 +8,6 @@ import Data.Bifunctor (first, second)
 import Data.Graph (SCC, stronglyConnComp)
 import Data.Set (Set)
 import qualified Data.Set as Set
-import Debug.Trace (traceShow)
 import GHC.Natural
 import qualified Language.Wasm.Structure as Wasm
 import WasmVerify.CFG.Fusion (simplifyCFG)
@@ -31,7 +30,7 @@ stronglyConnCompCFG cfg =
       ( \node ->
           ( node,
             nodeLabel node,
-            traceShow ((map nodeLabel . Set.toList) $ adjacents cfg node) ((map nodeLabel . Set.toList) $ adjacents cfg node)
+            (map nodeLabel . Set.toList) $ adjacents cfg node
           )
       )
       (Set.toList $ nodeSet cfg)
@@ -225,9 +224,23 @@ indexInstructions startIndex (instruction : restOfInstructions) =
 -}
 addInstructionIndex :: Wasm.Instruction Natural -> Int -> (Int, IndexedInstruction)
 addInstructionIndex blockInstr@(Wasm.Block _ blockBody) index =
-  (index + 1 + length blockBody, (index, blockInstr))
+  (index + 1 + deepLength blockBody, (index, blockInstr))
 addInstructionIndex loopInstr@(Wasm.Loop _ loopBody) index =
-  (index + 1 + length loopBody, (index, loopInstr))
+  (index + 1 + deepLength loopBody, (index, loopInstr))
 addInstructionIndex blockInstr@(Wasm.If _ ifBody elseBody) index =
-  (index + 1 + length ifBody + length elseBody, (index, blockInstr))
+  (index + 1 + deepLength ifBody + length elseBody, (index, blockInstr))
 addInstructionIndex instruction index = (index + 1, (index, instruction))
+
+-- Used to calculate the true number of instructions
+-- in a list of instructions. We cannot simply return
+-- the length of the list because 'Wasm.Block', 'Wasm.Loop'
+-- and 'Wasm.If' have nested lists of instructions inside.
+-- This recursive function also takes into account nested
+-- lists of instructions to calculate the total number of instructions.
+deepLength :: Wasm.Expression -> Int
+deepLength [] = 0
+deepLength ((Wasm.Block _ blockBody) : rest) = 1 + deepLength blockBody + deepLength rest
+deepLength ((Wasm.Loop _ loopBody) : rest) = 1 + deepLength loopBody + deepLength rest
+deepLength ((Wasm.If _ ifBody elseBody) : rest) =
+  1 + deepLength ifBody + deepLength elseBody + deepLength rest
+deepLength (_ : rest) = 1 + deepLength rest
