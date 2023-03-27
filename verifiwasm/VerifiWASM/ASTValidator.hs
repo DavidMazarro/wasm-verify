@@ -1,8 +1,59 @@
+-----------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------
+
+{- |
+ = Validation of VerifiWASM specifications #validation#
+
+ To ensure that VerifiWASM specifications are well-formed and sound,
+ this module provides some checks after the parsing of the specification
+ source file. Currently, these are the validations that are performed on any given
+ VerifiWASM specification:
+
+  - __Functions__ (i.e. WebAssembly function specifications) are validated as follows:
+
+      - Functions must have different names, and must also have
+      different names to any existing ghost functions.
+      - The name of the arguments in a function specification must not collide with
+      the name of an existing function or ghost function.
+      - When declaring local variables, their name must not collide with the name
+      of an existing ghost function.
+      - The instruction index in an 'Assert' must be greater or equal than 1,
+      it cannot be 0. It also cannot be a negative number, but that check is performed
+      during parsing of the VerifiWASM source code.
+      - TODO
+
+  - __Ghost functions__ are validated as follows:
+
+      - Ghost functions must have different names, and must also have
+      different names to any existing functions.
+      - The name of the arguments in a ghost function must not collide with the name
+      of an existing function or ghost function.
+      - Variable identifiers appearing in the 'Termination' condition of a
+      ghost function must be arguments of that ghost function.
+      - TODO
+
+ Both for functions and ghost functions, in 'Assert's \/ 'Requires' \/ 'Ensures'
+ or in the body of 'GhostFunction's, expressions ('Expr') can appear.
+ These are the validations that are performed on expressions:
+
+  - Variable identifiers appearing in an expression must have been declared
+  as arguments or as local variables in the local scope of the expression.
+  - Expressions must be sound from a type perspective: arithmetic operations
+  require that its operands are integer expressions, @if-then-else@ requires
+  that the condition is a boolean expression and the @then@ body and @else@ body
+  are of the same type, etc.
+  - Ghost function calls appearing in expressions require that the
+  ghost function exists in the VerifiWASM module, that the number
+  of arguments received is the same it is supposed to receive, and that
+  the types are integers (TODO? CONFIRM BOOLEANS).
+-}
 module VerifiWASM.ASTValidator where
 
-import Control.Monad (void, when)
+import Control.Monad (unless, void, when)
 import Control.Monad.State (get, gets, put)
 import Data.Containers.ListUtils (nubOrd)
+import Data.List (intercalate, intersect)
 import qualified Data.Map as M
 import Data.Maybe (fromJust, isNothing)
 import Data.Text (Text, pack)
@@ -10,60 +61,123 @@ import Helpers.ANSI (bold)
 import VerifiWASM.LangTypes
 import VerifiWASM.VerifiWASM
 
+{- | A function that validates a complete VerifiWASM specification,
+ throwing an exception within the 'VerifiWASM' monad when any
+ of the checks aren't met. See the [Validation](#validation) section
+ above for a list of the current checks that are performed.
+-}
 validate :: Program -> VerifiWASM ()
 validate program = do
   globalTypes <- programTypes program
   put $
     ContextState
       { globalTypes = globalTypes,
-        localTypes = M.empty,
+        localTypes = ("", M.empty),
         ghostFunReturnTypes = ghostFunReturnTypes
       }
-  mapM_ validateGhostFun (ghostFunctions program)
-  mapM_ validateFunction (functions program)
+  let functionAndGhostNames = allFunctionAndGhostNames program
+  mapM_ (validateGhostFun functionAndGhostNames) (ghostFunctions program)
+  mapM_ (validateFunction functionAndGhostNames) (functions program)
   where
     ghostFunReturnTypes =
       M.fromList $
         map (\ghostFun -> (ghostName ghostFun, ghostReturnType ghostFun)) $
           ghostFunctions program
 
-validateFunction :: Function -> VerifiWASM ()
-validateFunction function = do
+validateFunction :: [Identifier] -> Function -> VerifiWASM ()
+validateFunction functionAndGhostNames function = do
   -- Sets the local context
-  types <- lookupTypesInFunction $ funcName function
+  let name = funcName function
+  types <- lookupTypesInFunction name
   ContextState{..} <- get
-  put $ ContextState{globalTypes, localTypes = types, ghostFunReturnTypes}
+  put $ ContextState{globalTypes, localTypes = (name, types), ghostFunReturnTypes}
 
-  validateRequires (funcName function) (requires . funcSpec $ function)
-  validateEnsures (funcName function) (ensures . funcSpec $ function)
-  mapM_ (validateAsserts . funcName $ function) $ asserts . funcSpec $ function
+  let identifierCollissions = functionAndGhostNames `intersect` funcArgsIdentifiers
+  unless (null identifierCollissions) $
+    argsIdentifiersCollissionsErr "function specification" "arguments" name identifierCollissions
 
-validateGhostFun :: GhostFunction -> VerifiWASM ()
-validateGhostFun ghostFun = do
+  validateLocals functionAndGhostNames . locals . funcSpec $ function
+  validateRequires (requires . funcSpec $ function)
+  validateEnsures (ensures . funcSpec $ function)
+  mapM_ validateAssert $ asserts . funcSpec $ function
+  where
+    funcArgsIdentifiers = map fst . funcArgs $ function
+
+validateGhostFun :: [Identifier] -> GhostFunction -> VerifiWASM ()
+validateGhostFun functionAndGhostNames ghostFun = do
   -- Sets the local context
-  types <- lookupTypesInGhostFun $ ghostName ghostFun
+  let name = ghostName ghostFun
+  types <- lookupTypesInGhostFun name
   ContextState{..} <- get
-  put $ ContextState{globalTypes, localTypes = types, ghostFunReturnTypes}
+  put $ ContextState{globalTypes, localTypes = (name, types), ghostFunReturnTypes}
+
+  let identifierCollissions = functionAndGhostNames `intersect` ghostArgsIdentifiers
+  unless (null identifierCollissions) $
+    argsIdentifiersCollissionsErr "ghost function" "arguments" name identifierCollissions
 
   void . validateExpr . ghostExpr $ ghostFun
-  validateTermination (ghostName ghostFun) (ghostTermination ghostFun)
-  validateRequires (ghostName ghostFun) (ghostRequires ghostFun)
+  validateTermination ghostFun (ghostTermination ghostFun)
+  validateRequires (ghostRequires ghostFun)
+  where
+    ghostArgsIdentifiers = map fst . ghostArgs $ ghostFun
 
-validateTermination :: Identifier -> Termination -> VerifiWASM ()
-validateTermination = undefined -- TODO
+validateTermination :: GhostFunction -> Termination -> VerifiWASM ()
+validateTermination ghostFun (Decreases identifiers) = do
+  -- Make sure that all identifiers in the termination condition
+  -- are arguments of the ghost function
+  mapM_ validateIdentifier identifiers
+  where
+    validateIdentifier :: Identifier -> VerifiWASM ()
+    validateIdentifier identifier =
+      unless (identifier `elem` argumentIdentifiers) $ notInArgsErr identifier
+    argumentIdentifiers = map fst . ghostArgs $ ghostFun
+    notInArgsErr identifier =
+      failWithError $
+        Failure $
+          "In the ghost function "
+            <> (bold . pack . ghostName)
+              ghostFun
+            <> ", the variable "
+            <> (bold . pack)
+              identifier
+            <> " appearing in the termination condition of the ghost function"
+            <> " is not one of the arguments of the ghost function:\n"
+            <> (bold . pack . intercalate ", ")
+              argumentIdentifiers
+            <> "\nVariables appearing in a termination condition must"
+            <> " refer to the arguments of the ghost function."
 
-validateRequires :: Identifier -> Requires -> VerifiWASM ()
-validateRequires name (Requires expr) = do
-  _ <- lookupTypesInFunction name
+validateRequires :: Requires -> VerifiWASM ()
+validateRequires (Requires expr) = void . validateExpr $ expr
+
+validateEnsures :: Ensures -> VerifiWASM ()
+validateEnsures (Ensures expr) = void . validateExpr $ expr
+
+validateAssert :: Assert -> VerifiWASM ()
+validateAssert (Assert (instrIndex, expr)) = do
+  when (instrIndex == 0) indexOutOfBoundsErr
   void . validateExpr $ expr
-
-validateEnsures :: Identifier -> Ensures -> VerifiWASM ()
-validateEnsures name (Ensures expr) = do
-  _ <- lookupTypesInFunction name
-  void . validateExpr $ expr
-
-validateAsserts :: Identifier -> Assert -> VerifiWASM ()
-validateAsserts = undefined
+  where
+    indexOutOfBoundsErr =
+      failWithError $
+        Failure $
+          "Instruction index "
+            <> (bold . pack . show)
+              instrIndex
+            <> " was found in an assert,"
+            <> " but instruction indices cannot be 0."
+validateLocals :: [Identifier] -> [Local] -> VerifiWASM ()
+validateLocals functionAndGhostNames localDecls = do
+  currentFuncName <- gets (fst . localTypes)
+  let identifierCollissions = functionAndGhostNames `intersect` localIdentifiers
+  unless (null identifierCollissions) $
+    argsIdentifiersCollissionsErr
+      "function specification"
+      "local variables"
+      currentFuncName
+      identifierCollissions
+  where
+    localIdentifiers = [fst localVar | localDecl <- localDecls, localVar <- localVars localDecl]
 
 {- | Validates an expression and returns its type,
  recursively validating the expressions inside.
@@ -72,23 +186,24 @@ validateExpr :: Expr -> VerifiWASM ExprType
 validateExpr (FunCall ghostFun args) = do
   ghostFunTypes <- lookupTypesInGhostFun ghostFun
   _localTypes <- gets localTypes
-  _ghostFunReturnTypes <- gets ghostFunReturnTypes
+  ghostFunReturnTypes <- gets ghostFunReturnTypes
 
   -- Right now we aren't differentiating between I32 or I64
   -- in the arguments, so it suffices to check that the function
   -- call is made with the same number of arguments and that
   -- the types are all integer.
-  -- TODO: Confirm if we should keep track of I32 and I64 types.
   argTypes <- mapM validateExpr args
   let numArgs = length args
   let numGhostFunTypes = length ghostFunTypes
 
   when (numArgs /= numGhostFunTypes) $ badNumOfArgsErr numArgs numGhostFunTypes
   when (any (/= ExprInt) argTypes) notAllIntegerArgsErr -- TODO: Shouldn't we allow boolean values? For predicates
-
-  -- TODO: 
-
-  return ExprInt -- TODO: replace with proper type from ghost function
+  let mReturnType = M.lookup ghostFun ghostFunReturnTypes
+  when (isNothing mReturnType) $ notFoundGhostFunErr ghostFun
+  -- The use of 'fromJust' here is safe because we have
+  -- just checked whether the value is 'Nothing' or not
+  -- (and in that case, we throw a custom failure)
+  return $ fromJust mReturnType
   where
     badNumOfArgsErr receivedArgs actualArgs =
       failWithError $
@@ -165,8 +280,29 @@ validateExpr topExpr@(BGreaterOrEq leftExpr rightExpr) =
   validateBinary topExpr leftExpr rightExpr ExprInt ExprBool
 validateExpr topExpr@(BGreater leftExpr rightExpr) =
   validateBinary topExpr leftExpr rightExpr ExprInt ExprBool
-validateExpr (IVar _) =
-  undefined -- TODO
+validateExpr (IVar identifier) = do
+  (scopeName, varTypes) <- gets localTypes
+
+  unless (identifier `M.member` varTypes) $ variableNotInScopeErr scopeName
+
+  -- Variables can currently only be of integer type.
+  return ExprInt
+  where
+    variableNotInScopeErr scopeName =
+      failWithError $
+        Failure $
+          "Variable "
+            <> (bold . pack)
+              identifier
+            <> " was used in "
+            <> (bold . pack)
+              scopeName
+            <> " but it was not declared in the scope.\n"
+            <> "Make sure it appears as an argument to "
+            <> (bold . pack)
+              scopeName
+            <> " or that it is declared as a local variable"
+            <> " (this only applies to function specifications, not ghost functions)."
 validateExpr (IInt _) =
   return ExprInt
 validateExpr topExpr@(INeg subExpr) =
@@ -206,7 +342,7 @@ validateUnary topExpr subExpr expectedType returnType = do
       BNot _ -> "not b (boolean negation)"
       INeg _ -> "-n (negative for numbers)"
       IAbs _ -> "|n| (absolute value)"
-      _ -> error "This shouldn't happen."
+      _ -> error "This should not happen."
 
 validateBinary :: Expr -> Expr -> Expr -> ExprType -> ExprType -> VerifiWASM ExprType
 validateBinary topExpr leftExpr rightExpr expectedType returnType = do
@@ -250,7 +386,7 @@ validateBinary topExpr leftExpr rightExpr expectedType returnType = do
       IMult _ _ -> "*"
       IDiv _ _ -> "/"
       IMod _ _ -> "%"
-      _ -> error "This shouldn't happen."
+      _ -> error "This should not have happened. Report this as a bug."
 
 validateSameType :: Expr -> Expr -> Expr -> VerifiWASM ExprType
 validateSameType topExpr leftExpr rightExpr = do
@@ -279,7 +415,7 @@ validateSameType topExpr leftExpr rightExpr = do
     returnType expr = case expr of
       BEq _ _ -> ExprBool
       BDistinct _ _ -> ExprBool
-      _ -> error "This shouldn't happen."
+      _ -> error "This should not have happened. Report this as a bug."
 
 ----------- Helper functions -----------
 
@@ -292,11 +428,8 @@ validateSameType topExpr leftExpr rightExpr = do
  within that function/ghost function its corresponding type.
 -}
 programTypes :: Program -> VerifiWASM FunTypes
-programTypes Program{functions, ghostFunctions} = do
-  let functionNames = map funcName functions
-  let ghostFunctionNames = map ghostName ghostFunctions
-  let allNames = functionNames ++ ghostFunctionNames
-
+programTypes program@Program{functions, ghostFunctions} = do
+  let allNames = allFunctionAndGhostNames program
   -- Ensuring that there are no duplicate function/ghost function
   -- names allows us to perform union of the VarTypes safely
   -- since there will be no collisions.
@@ -392,21 +525,13 @@ lookupTypesInGhostFun ghostFun = do
 
   let mVarTypes = M.lookup ghostFun $ globalTypes contextState
 
-  when (isNothing mVarTypes) notFoundGhostFunErr
+  -- If the ghost function isn't found in the program, we throw an error.
+  when (isNothing mVarTypes) $ notFoundGhostFunErr ghostFun
 
   -- The use of 'fromJust' here is safe because we have
   -- just checked whether the value is 'Nothing' or not
   -- (and in that case, we throw a custom failure)
   return $ fromJust mVarTypes
-  where
-    notFoundGhostFunErr =
-      failWithError $
-        Failure $
-          "Ghost function "
-            <> (bold . pack)
-              ghostFun
-            <> " could not be found in the VerifiWASM file "
-            <> "(this shouldn't have happened, report as an issue)."
 
 lookupTypesInFunction :: Identifier -> VerifiWASM VarTypes
 lookupTypesInFunction function = do
@@ -414,6 +539,7 @@ lookupTypesInFunction function = do
 
   let mVarTypes = M.lookup function $ globalTypes contextState
 
+  -- If the function isn't found in the program, we throw an error.
   when (isNothing mVarTypes) notFoundFunErr
 
   -- The use of 'fromJust' here is safe because we have
@@ -429,3 +555,36 @@ lookupTypesInFunction function = do
               function
             <> " could not be found in the VerifiWASM file "
             <> "(this shouldn't have happened, report as an issue)."
+
+allFunctionAndGhostNames :: Program -> [Identifier]
+allFunctionAndGhostNames Program{functions, ghostFunctions} = functionNames ++ ghostFunctionNames
+  where
+    functionNames = map funcName functions
+    ghostFunctionNames = map ghostName ghostFunctions
+
+notFoundGhostFunErr :: Identifier -> VerifiWASM ()
+notFoundGhostFunErr name =
+  failWithError $
+    Failure $
+      "Ghost function "
+        <> (bold . pack)
+          name
+        <> " could not be found in the VerifiWASM file."
+
+argsIdentifiersCollissionsErr :: Text -> Text -> Identifier -> [Identifier] -> VerifiWASM ()
+argsIdentifiersCollissionsErr functionOrGhost argsOrLocals name collissions =
+  failWithError $
+    Failure $
+      "In the "
+        <> functionOrGhost
+        <> " "
+        <> (bold . pack)
+          name
+        <> ", some of the "
+        <> argsOrLocals
+        <> " were declared with names "
+        <> "that overlap with some of the function or ghost function names:\n"
+        <> (bold . pack . intercalate ", ")
+          collissions
+        <> "\nPlease rename either the arguments or the functions/ghost functions"
+        <> " to avoid name collissions."
