@@ -28,7 +28,7 @@ common common-extensions
 
 library
   import:           common-extensions
-  hs-source-dirs:   src verifiwasm
+  hs-source-dirs:   src
   exposed-modules:
     Helpers.ANSI
     VerifiWASM.ASTValidator
