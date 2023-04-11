@@ -82,19 +82,3 @@ areFusionableInCFG cfg initialLabel node1 node2 =
     nodeLabel1 = nodeLabel node1
     nodeLabel2 = nodeLabel node2
     edgeBetweenNodes = Set.singleton (Edge nodeLabel1 Empty nodeLabel2)
-
--- * Helper functions
-
-{- | Gets the set of edges that go __from__ the specified
- 'Node' to other 'Node's in the 'CFG'.
--}
-edgesFromNode :: Node -> CFG -> Set Edge
-edgesFromNode (Node (label, _)) cfg =
-  Set.filter ((== label) . from) $ edgeSet cfg
-
-{- | Gets the set of edges that go __to__ the specified
- 'Node' from other 'Node's in the 'CFG'.
--}
-edgesToNode :: Node -> CFG -> Set Edge
-edgesToNode (Node (label, _)) cfg =
-  Set.filter ((== label) . to) $ edgeSet cfg

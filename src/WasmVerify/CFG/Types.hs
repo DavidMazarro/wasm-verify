@@ -1,6 +1,7 @@
 module WasmVerify.CFG.Types where
 
 import Data.Set (Set)
+import qualified Data.Set as Set
 import GHC.Natural
 import qualified Language.Wasm.Structure as Wasm
 
@@ -95,3 +96,17 @@ nodeSet = fst . cfg
 -- | Returns the 'Set' of 'Edge's in a 'CFG'.
 edgeSet :: CFG -> Set Edge
 edgeSet = snd . cfg
+
+{- | Gets the set of edges that go __from__ the specified
+ 'Node' to other 'Node's in the 'CFG'.
+-}
+edgesFromNode :: Node -> CFG -> Set Edge
+edgesFromNode (Node (label, _)) cfg =
+  Set.filter ((== label) . from) $ edgeSet cfg
+
+{- | Gets the set of edges that go __to__ the specified
+ 'Node' from other 'Node's in the 'CFG'.
+-}
+edgesToNode :: Node -> CFG -> Set Edge
+edgesToNode (Node (label, _)) cfg =
+  Set.filter ((== label) . to) $ edgeSet cfg
