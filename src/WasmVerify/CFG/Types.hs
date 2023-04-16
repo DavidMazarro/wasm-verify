@@ -110,3 +110,23 @@ edgesFromNode (Node (label, _)) cfg =
 edgesToNode :: Node -> CFG -> Set Edge
 edgesToNode (Node (label, _)) cfg =
   Set.filter ((== label) . to) $ edgeSet cfg
+
+{- | It returns the set of nodes adjacent to a given one,
+ taking the following definition of adjacency:
+ "a node Y in a CFG is adjacent to a node X if there
+ is an edge that goes from X to Y".
+-}
+adjacents :: CFG -> Node -> Set Node
+adjacents cfg (Node (label, _)) =
+  nodesFromNodeLabels $ adjacentNodeLabels label cfg
+  where
+    nodesFromNodeLabels nodeLabels =
+      Set.filter ((`Set.member` nodeLabels) . fst . node) $ nodeSet cfg
+
+{- | Gets the set of 'NodeLabel's corresponding to the
+ nodes adjacent from a given 'NodeLabel'. See 'adjacents'
+ for our definition of "adjacency".
+-}
+adjacentNodeLabels :: NodeLabel -> CFG -> Set NodeLabel
+adjacentNodeLabels label cfg =
+  Set.map to . Set.filter ((== label) . from) $ edgeSet cfg

@@ -188,20 +188,6 @@ naturalToInt :: Natural -> Int
 naturalToInt = fromInteger . naturalToInteger
 #endif
 
-{- | It returns the set of nodes adjacent to a given one,
- taking the following definition of adjacency:
- "a node Y in a CFG is adjacent to a node X if there
- is an edge that goes from X to Y".
--}
-adjacents :: CFG -> Node -> Set Node
-adjacents cfg (Node (label, _)) =
-  nodesFromNodeLabels adjacentNodeLabels
-  where
-    nodesFromNodeLabels nodeLabels =
-      Set.filter ((`Set.member` nodeLabels) . fst . node) $ nodeSet cfg
-    adjacentNodeLabels =
-      Set.map to . Set.filter ((== label) . from) $ edgeSet cfg
-
 {- | Adds an index to each instruction of
  a list coming from a 'Wasm.Function' body.
  Used to keep track of the index of an instruction to check
