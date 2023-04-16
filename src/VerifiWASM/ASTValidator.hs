@@ -12,6 +12,8 @@
 
   - __Functions__ (i.e. WebAssembly function specifications) are validated as follows:
 
+      - Functions described in the specification must exist in the
+      WebAssembly module that is to be verified, and have the same name.
       - Functions must have different names, and must also have
       different names to any existing ghost functions.
       - The name of the arguments in a function specification must not collide with
@@ -57,7 +59,10 @@ import Data.List (intercalate, intersect)
 import qualified Data.Map as M
 import Data.Maybe (fromJust, isNothing)
 import Data.Text (Text, pack)
+import qualified Data.Text.Lazy as Lazy
 import Helpers.ANSI (bold)
+import qualified Language.Wasm as Wasm
+import qualified Language.Wasm.Structure as Wasm hiding (Import (name))
 import VerifiWASM.LangTypes
 import VerifiWASM.VerifiWASM
 
@@ -66,8 +71,10 @@ import VerifiWASM.VerifiWASM
  of the checks aren't met. See the [Validation](#validation) section
  above for a list of the current checks that are performed.
 -}
-validate :: Program -> VerifiWASM ()
-validate program = do
+validate :: Program -> Wasm.ValidModule -> VerifiWASM ()
+validate program wasmModule = do
+  validateFunctionsExist program wasmModule
+
   globalTypes <- programTypes program
   put $
     ContextState
@@ -83,6 +90,26 @@ validate program = do
       M.fromList $
         map (\ghostFun -> (ghostName ghostFun, ghostReturnType ghostFun)) $
           ghostFunctions program
+
+{- | Checks that the function specifications described in
+ the VerifiWASM module actually exist within the WebAssembly
+ module that is to be verified.
+-}
+validateFunctionsExist :: Program -> Wasm.ValidModule -> VerifiWASM ()
+validateFunctionsExist program wasmModule = do
+  let specFunctionNames = map (Lazy.pack . funcName) $ functions program
+  let wasmFunctionNames = map Wasm.name $ (Wasm.exports . Wasm.getModule) wasmModule
+  -- All function names in the spec must be an element of
+  -- the list of function names in the WASM module.
+  -- Otherwise we throw an error.
+  let droppedNames = dropWhile (`elem` wasmFunctionNames) specFunctionNames
+  unless (null droppedNames) $
+    failWithError $
+      Failure $
+        "The function "
+          <> (bold . Lazy.toStrict . head $ droppedNames)
+          <> " was defined in the VerifiWASM specification,"
+          <> " but no function with that name exists in the WebAssembly module."
 
 validateFunction :: [Identifier] -> Function -> VerifiWASM ()
 validateFunction functionAndGhostNames function = do
