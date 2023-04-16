@@ -12,6 +12,7 @@ import qualified Data.ByteString.Lazy as BS (putStr)
 import qualified Data.Map as M
 import Data.Text (Text)
 import Data.Text.Encoding (encodeUtf8Builder)
+import Helpers.ANSI (colorInRed)
 import VerifiWASM.LangTypes
 
 {- | The base monad used for all actions and checks performed
@@ -67,9 +68,7 @@ runVerifiWASM action = do
 logError :: Failure -> VerifiWASM ()
 logError err =
   lift . lift . tell . encodeUtf8Builder $
-    colorInRed "ERROR:" <> " " <> unFailure err <> "\n"
-  where
-    colorInRed = \s -> "\ESC[31m" <> s <> "\ESC[97m"
+    colorInRed "VerifiWASM ERROR:" <> " " <> unFailure err <> "\n"
 
 {- | Provides an easy action for throwing a 'Failure' as an 'Exception'
  within 'VerifiWASM' contexts.
