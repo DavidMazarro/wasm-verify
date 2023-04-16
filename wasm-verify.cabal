@@ -39,6 +39,7 @@ library
     WasmVerify.CFG
     WasmVerify.CFG.Fusion
     WasmVerify.CFG.Types
+    WasmVerify.Monad
 
   build-depends:
     , base
@@ -73,7 +74,7 @@ executable wasm-verify
     , wasm-verify
 
   ghc-options:
-    -Wall -Wcompat -Werror -Widentities -Wincomplete-record-updates
+    -Wall -Werror -Wcompat -Widentities -Wincomplete-record-updates
     -Wincomplete-uni-patterns -Wmissing-export-lists
     -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
 
