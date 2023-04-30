@@ -36,10 +36,10 @@ data GhostFunction = GhostFunction
     ghostExpr :: Expr,
     ghostReturnType :: ExprType
   }
-  deriving (Show)
+  deriving (Eq, Ord, Show)
 
 newtype Termination = Decreases [Identifier]
-  deriving (Show)
+  deriving (Eq, Ord, Show)
 
 type TypedIdentifier = (Identifier, IdType)
 
@@ -57,7 +57,7 @@ newtype Local = Local {localVars :: [TypedIdentifier]}
   deriving (Show)
 
 newtype Requires = Requires Expr
-  deriving (Show)
+  deriving (Eq, Ord, Show)
 
 newtype Ensures = Ensures Expr
   deriving (Show)
@@ -136,13 +136,13 @@ data Expr
   | IDiv Expr Expr
   | IMod Expr Expr
   | IAbs Expr
-  deriving (Show)
+  deriving (Eq, Ord, Show)
 
 data ExprType = ExprBool | ExprInt
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 data IdType = I32 | I64
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 type Identifier = String
 
