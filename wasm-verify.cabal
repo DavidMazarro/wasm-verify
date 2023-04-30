@@ -51,6 +51,7 @@ library
     , parser-combinators
     , path
     , pretty-simple
+    , safe
     , safe-exceptions
     , text
     , transformers

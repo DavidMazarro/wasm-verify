@@ -49,14 +49,15 @@
 
   - Variable identifiers appearing in an expression must have been declared
   as arguments or as local variables in the local scope of the expression.
-  - Expressions must be sound from a type perspective: arithmetic operations
+  - Expressions must be sound from a type perspective. For instance, arithmetic operations
   require that its operands are integer expressions, @if-then-else@ requires
   that the condition is a boolean expression and the @then@ body and @else@ body
   are of the same type, etc.
-  - Ghost function calls appearing in expressions require that the
-  ghost function exists in the VerifiWASM module, that the number
-  of arguments received is the same it is supposed to receive, and that
-  the types are integers.
+  - Ghost function calls appearing in expressions require:
+      - That the called ghost function exists in the VerifiWASM module.
+      - That the number of arguments received matches with the number of
+        arguments that appear in its definition.
+      - That the types of all arguments are integers.
   Currently, ghost functions don't support boolean arguments.
   - In an expression, it only makes sense to do a function call on a ghost function.
   Trying to call a function specification in an expression will result in an error.
