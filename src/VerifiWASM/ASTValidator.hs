@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 -----------------------------------------------------------------------------
 
 -----------------------------------------------------------------------------
@@ -14,16 +16,21 @@
 
       - Functions described in the specification must exist in the
       WebAssembly module that is to be verified, and have the same name.
+      - Functions described in the specification must have a matching number
+      of arguments and the same types than those of the WebAssembly function
+      of the same name.
       - Functions must have different names, and must also have
       different names to any existing ghost functions.
-      - The name of the arguments in a function specification must not collide with
-      the name of an existing function or ghost function.
+      - The name of the arguments, local variables or return values in a function
+      specification must not collide with the name of an existing function or ghost function,
+      - There cannot be name duplicates among arguments, local variables or return values
+      of a function specification.
       - When declaring local variables, their name must not collide with the name
       of an existing ghost function.
       - The instruction index in an 'Assert' must be greater or equal than 1,
       it cannot be 0. It also cannot be a negative number, but that check is performed
       during parsing of the VerifiWASM source code.
-      - TODO
+      - TODO: review which other validations I'm doing
 
   - __Ghost functions__ are validated as follows:
 
@@ -31,12 +38,13 @@
       different names to any existing functions.
       - The name of the arguments in a ghost function must not collide with the name
       of an existing function or ghost function.
+      - There cannot be name duplicates among the arguments of a ghost function.
       - Variable identifiers appearing in the 'Termination' condition of a
       ghost function must be arguments of that ghost function.
-      - TODO
+      - TODO: review which other validations I'm doing
 
- Both for functions and ghost functions, in 'Assert's \/ 'Requires' \/ 'Ensures'
- or in the body of 'GhostFunction's, expressions ('Expr') can appear.
+ In addition, in the 'Assert's \/ 'Requires' \/ 'Ensures' of functions,
+ or in the body of 'GhostFunction's, there are expressions ('Expr').
  These are the validations that are performed on expressions:
 
   - Variable identifiers appearing in an expression must have been declared
@@ -48,21 +56,25 @@
   - Ghost function calls appearing in expressions require that the
   ghost function exists in the VerifiWASM module, that the number
   of arguments received is the same it is supposed to receive, and that
-  the types are integers (TODO? CONFIRM BOOLEANS).
+  the types are integers.
+  Currently, ghost functions don't support boolean arguments.
+  - In an expression, it only makes sense to do a function call on a ghost function.
+  Trying to call a function specification in an expression will result in an error.
 -}
 module VerifiWASM.ASTValidator where
 
 import Control.Monad (unless, void, when)
 import Control.Monad.State (get, gets, put)
 import Data.Containers.ListUtils (nubOrd)
-import Data.List (intercalate, intersect)
+import Data.List (find, intercalate, intersect)
 import qualified Data.Map as M
 import Data.Maybe (fromJust, isNothing)
 import Data.Text (Text, pack)
 import qualified Data.Text.Lazy as Lazy
+import GHC.Natural
 import Helpers.ANSI (bold)
 import qualified Language.Wasm as Wasm
-import qualified Language.Wasm.Structure as Wasm hiding (Import (name))
+import qualified Language.Wasm.Structure as Wasm hiding (Import (desc, name))
 import VerifiWASM.LangTypes
 import VerifiWASM.VerifiWASM
 
@@ -73,7 +85,12 @@ import VerifiWASM.VerifiWASM
 -}
 validate :: Program -> Wasm.ValidModule -> VerifiWASM ()
 validate program wasmModule = do
-  validateFunctionsExist program wasmModule
+  -- TODO: Add check for multivalue functions,
+  -- or at least fail with unsupported.
+
+  validateFunctionsExist program (map fst wasmFunctions)
+
+  mapM_ (validateSpecArgReturnTypes wasmModule wasmFunctions) (functions program)
 
   globalTypes <- programTypes program
   put $
@@ -86,6 +103,14 @@ validate program wasmModule = do
   mapM_ (validateGhostFun functionAndGhostNames) (ghostFunctions program)
   mapM_ (validateFunction functionAndGhostNames) (functions program)
   where
+    wasmFunctions =
+      concatMap
+        ( \export -> case Wasm.desc export of
+            Wasm.ExportFunc index ->
+              [(Wasm.name export, (Wasm.functions . Wasm.getModule) wasmModule !! naturalToInt index)]
+            _ -> []
+        )
+        $ (Wasm.exports . Wasm.getModule) wasmModule
     ghostFunReturnTypes =
       M.fromList $
         map (\ghostFun -> (ghostName ghostFun, ghostReturnType ghostFun)) $
@@ -95,10 +120,9 @@ validate program wasmModule = do
  the VerifiWASM module actually exist within the WebAssembly
  module that is to be verified.
 -}
-validateFunctionsExist :: Program -> Wasm.ValidModule -> VerifiWASM ()
-validateFunctionsExist program wasmModule = do
+validateFunctionsExist :: Program -> [Lazy.Text] -> VerifiWASM ()
+validateFunctionsExist program wasmFunctionNames = do
   let specFunctionNames = map (Lazy.pack . funcName) $ functions program
-  let wasmFunctionNames = map Wasm.name $ (Wasm.exports . Wasm.getModule) wasmModule
   -- All function names in the spec must be an element of
   -- the list of function names in the WASM module.
   -- Otherwise we throw an error.
@@ -110,6 +134,68 @@ validateFunctionsExist program wasmModule = do
           <> (bold . Lazy.toStrict . head $ droppedNames)
           <> " was defined in the VerifiWASM specification,"
           <> " but no function with that name exists in the WebAssembly module."
+
+{- | Checks that a function specification described in
+ the VerifiWASM module has a matching number of arguments
+ and the same types than those of the WebAssembly function
+ of the same name.
+-}
+validateSpecArgReturnTypes :: Wasm.ValidModule -> [(Lazy.Text, Wasm.Function)] -> Function -> VerifiWASM ()
+validateSpecArgReturnTypes wasmModule wasmFunctions spec = do
+  let mWasmFunction = find (\name -> (Lazy.unpack . fst) name == funcName spec) wasmFunctions
+
+  -- Due to the existence validation in 'validateFunctionsExist',
+  -- this error shouldn't happen.
+  when (isNothing mWasmFunction) $ notFoundWasmFunErr $ funcName spec
+
+  -- The use of 'fromJust' here is safe because we have
+  -- just checked whether the value is 'Nothing' or not
+  -- (and in that case, we throw a custom failure)
+  let (_, wasmFunction) = fromJust mWasmFunction
+  let wasmFuncType = wasmFuncTypes !! naturalToInt (Wasm.funcType wasmFunction)
+  let wasmArgTypes = Wasm.params wasmFuncType
+  let wasmReturnTypes = Wasm.results wasmFuncType
+  let wasmLocalTypes = Wasm.localTypes wasmFunction
+
+  unless (listEqualWith idTypeEqWasmType specArgTypes wasmArgTypes) $
+    mismatchTypesErr "arguments" specArgTypes wasmArgTypes
+  unless (listEqualWith idTypeEqWasmType specReturnTypes wasmReturnTypes) $
+    mismatchTypesErr "return values" specReturnTypes wasmReturnTypes
+  unless (listEqualWith idTypeEqWasmType specLocalTypes wasmLocalTypes) $
+    mismatchTypesErr "local variables" specLocalTypes wasmLocalTypes
+  where
+    wasmFuncTypes = (Wasm.types . Wasm.getModule) wasmModule
+    specArgTypes = map snd $ funcArgs spec
+    specReturnTypes = map snd $ funcReturns spec
+    specLocalTypes = map snd $ (concatMap localVars . locals . funcSpec) spec
+    notFoundWasmFunErr name =
+      failWithError $
+        Failure $
+          "Function "
+            <> (bold . pack)
+              name
+            <> " could not be found in the WebAssembly module "
+            <> "(this shouldn't have happened, report as a bug)."
+    mismatchTypesErr argReturnOrLocals specTypes wasmTypes =
+      failWithError $
+        Failure $
+          "The "
+            <> argReturnOrLocals
+            <> "' types in function specification "
+            <> (bold . pack . funcName)
+              spec
+            <> " do not match with those of the corresponding WebAssembly function:\n"
+            <> "The function specification has the following types for its "
+            <> argReturnOrLocals
+            <> ": "
+            <> (bold . pack . show)
+              specTypes
+            <> "\n"
+            <> "Whereas the WebAssembly function has the following types for its "
+            <> argReturnOrLocals
+            <> ": "
+            <> (bold . pack . show)
+              wasmTypes
 
 validateFunction :: [Identifier] -> Function -> VerifiWASM ()
 validateFunction functionAndGhostNames function = do
@@ -123,7 +209,7 @@ validateFunction functionAndGhostNames function = do
   unless (null identifierCollissions) $
     argsIdentifiersCollissionsErr "function specification" "arguments" name identifierCollissions
 
-  validateLocals functionAndGhostNames . locals . funcSpec $ function
+  validateLocalIdentifiers functionAndGhostNames (locals . funcSpec $ function)
   validateRequires (requires . funcSpec $ function)
   validateEnsures (ensures . funcSpec $ function)
   mapM_ validateAssert $ asserts . funcSpec $ function
@@ -134,7 +220,7 @@ validateGhostFun :: [Identifier] -> GhostFunction -> VerifiWASM ()
 validateGhostFun functionAndGhostNames ghostFun = do
   -- Sets the local context
   let name = ghostName ghostFun
-  types <- lookupTypesInGhostFun name
+  (_, types) <- lookupTypesInGhostFun name
   ContextState{..} <- get
   put $ ContextState{globalTypes, localTypes = (name, types), ghostFunReturnTypes}
 
@@ -193,8 +279,12 @@ validateAssert (Assert (instrIndex, expr)) = do
               instrIndex
             <> " was found in an assert,"
             <> " but instruction indices cannot be 0."
-validateLocals :: [Identifier] -> [Local] -> VerifiWASM ()
-validateLocals functionAndGhostNames localDecls = do
+
+{- | Ensures that the names of local variables don't clash with
+  the names of existing ghost functions and function specifications.
+-}
+validateLocalIdentifiers :: [Identifier] -> [Local] -> VerifiWASM ()
+validateLocalIdentifiers functionAndGhostNames localDecls = do
   currentFuncName <- gets (fst . localTypes)
   let identifierCollissions = functionAndGhostNames `intersect` localIdentifiers
   unless (null identifierCollissions) $
@@ -211,9 +301,9 @@ validateLocals functionAndGhostNames localDecls = do
 -}
 validateExpr :: Expr -> VerifiWASM ExprType
 validateExpr (FunCall ghostFun args) = do
-  ghostFunTypes <- lookupTypesInGhostFun ghostFun
-  _localTypes <- gets localTypes
+  (ghostOrFuncSpec, ghostFunTypes) <- lookupTypesInGhostFun ghostFun
   ghostFunReturnTypes <- gets ghostFunReturnTypes
+  (scopeName, _) <- gets localTypes
 
   -- Right now we aren't differentiating between I32 or I64
   -- in the arguments, so it suffices to check that the function
@@ -223,8 +313,10 @@ validateExpr (FunCall ghostFun args) = do
   let numArgs = length args
   let numGhostFunTypes = length ghostFunTypes
 
-  when (numArgs /= numGhostFunTypes) $ badNumOfArgsErr numArgs numGhostFunTypes
-  when (any (/= ExprInt) argTypes) notAllIntegerArgsErr -- TODO: Shouldn't we allow boolean values? For predicates
+  when (ghostOrFuncSpec == FuncSpec) $ callFuncSpecErr scopeName ghostFun
+
+  when (numArgs /= numGhostFunTypes) $ badNumOfArgsErr scopeName numArgs numGhostFunTypes
+  when (any (/= ExprInt) argTypes) $ notAllIntegerArgsErr scopeName -- TODO: Mention the removal of this check in the issue about ghost function boolean arguments
   let mReturnType = M.lookup ghostFun ghostFunReturnTypes
   when (isNothing mReturnType) $ notFoundGhostFunErr ghostFun
   -- The use of 'fromJust' here is safe because we have
@@ -232,10 +324,13 @@ validateExpr (FunCall ghostFun args) = do
   -- (and in that case, we throw a custom failure)
   return $ fromJust mReturnType
   where
-    badNumOfArgsErr receivedArgs actualArgs =
+    badNumOfArgsErr caller receivedArgs actualArgs =
       failWithError $
         Failure $
-          "Ghost function "
+          "In some expression in the scope of "
+            <> (bold . pack)
+              caller
+            <> ":\nGhost function "
             <> (bold . pack)
               ghostFun
             <> " called with wrong number of arguments:\n"
@@ -245,14 +340,30 @@ validateExpr (FunCall ghostFun args) = do
             <> " arguments when it should have received "
             <> (bold . pack . show)
               actualArgs
-    notAllIntegerArgsErr =
+    notAllIntegerArgsErr caller =
       failWithError $
         Failure $
-          "Ghost function "
+          "In some expression in the scope of "
+            <> (bold . pack)
+              caller
+            <> ":\nGhost function "
             <> (bold . pack)
               ghostFun
             <> " expects all arguments to be integers,"
             <> " but it received an argument that is not an integer."
+    callFuncSpecErr caller callee =
+      failWithError $
+        Failure $
+          "In some expression in the scope of "
+            <> (bold . pack)
+              caller
+            <> ":\nThere's a function call to "
+            <> (bold . pack)
+              callee
+            <> ", which is a function specification."
+            <> "\nFunction specifications cannot be called, since they"
+            <> " are only meant to specify WebAssembly code. Hence, they"
+            <> " are not callable in VerifiWASM."
 validateExpr (IfThenElse ifExpr thenExpr elseExpr) = do
   ifType <- validateExpr ifExpr
 
@@ -466,14 +577,14 @@ programTypes program@Program{functions, ghostFunctions} = do
     mapM
       ( \function -> do
           funTypes <- functionTypes function
-          return $ M.singleton (funcName function) funTypes
+          return $ M.singleton (funcName function) (FuncSpec, funTypes)
       )
       functions
   ghostFunctionVarTypes <-
     mapM
       ( \ghostFun -> do
           ghostFunTypes <- ghostFunctionTypes ghostFun
-          return $ M.singleton (ghostName ghostFun) ghostFunTypes
+          return $ M.singleton (ghostName ghostFun) (Ghost, ghostFunTypes)
       )
       ghostFunctions
   let allVarTypes = functionVarTypes ++ ghostFunctionVarTypes
@@ -533,6 +644,23 @@ ghostFunctionTypes ghostFun = do
         <> "Make sure that all arguments are named differently"
         <> " within a ghost function declaration."
 
+{- | Checks that an 'IdType' from VerifiWASM and a
+ type from WebAssembly are the same.
+-}
+idTypeEqWasmType :: IdType -> Wasm.ValueType -> Bool
+idTypeEqWasmType I32 Wasm.I32 = True
+idTypeEqWasmType I64 Wasm.I64 = True
+idTypeEqWasmType _ _ = False
+
+{- | Compares two lists of different types for equality
+ with a custom predicate.
+-}
+listEqualWith :: (a -> b -> Bool) -> [a] -> [b] -> Bool
+listEqualWith _ [] [] = True
+listEqualWith _ [] _ = False
+listEqualWith _ _ [] = False
+listEqualWith p (x : xs) (y : ys) = p x y && listEqualWith p xs ys
+
 ensureNoDuplicateNames :: [Identifier] -> Text -> VerifiWASM ()
 ensureNoDuplicateNames names errMsg = do
   -- If the number of names doesn't match
@@ -546,7 +674,7 @@ prettyType :: ExprType -> Text
 prettyType ExprBool = "boolean"
 prettyType ExprInt = "integer"
 
-lookupTypesInGhostFun :: Identifier -> VerifiWASM VarTypes
+lookupTypesInGhostFun :: Identifier -> VerifiWASM (GhostOrFuncSpec, VarTypes)
 lookupTypesInGhostFun ghostFun = do
   contextState <- get
 
@@ -567,21 +695,21 @@ lookupTypesInFunction function = do
   let mVarTypes = M.lookup function $ globalTypes contextState
 
   -- If the function isn't found in the program, we throw an error.
-  when (isNothing mVarTypes) notFoundFunErr
+  when (isNothing mVarTypes) $ notFoundFunErr function
 
   -- The use of 'fromJust' here is safe because we have
   -- just checked whether the value is 'Nothing' or not
   -- (and in that case, we throw a custom failure)
-  return $ fromJust mVarTypes
+  return $ (snd . fromJust) mVarTypes
   where
-    notFoundFunErr =
+    notFoundFunErr name =
       failWithError $
         Failure $
           "Function specification "
             <> (bold . pack)
-              function
+              name
             <> " could not be found in the VerifiWASM file "
-            <> "(this shouldn't have happened, report as an issue)."
+            <> "(this shouldn't have happened, report as a bug)."
 
 allFunctionAndGhostNames :: Program -> [Identifier]
 allFunctionAndGhostNames Program{functions, ghostFunctions} = functionNames ++ ghostFunctionNames
@@ -613,5 +741,20 @@ argsIdentifiersCollissionsErr functionOrGhost argsOrLocals name collissions =
         <> "that overlap with some of the function or ghost function names:\n"
         <> (bold . pack . intercalate ", ")
           collissions
-        <> "\nPlease rename either the arguments or the functions/ghost functions"
+        <> "\nPlease rename either the "
+        <> argsOrLocals
+        <> " or the functions/ghost functions"
         <> " to avoid name collissions."
+
+-- 'naturalToInt' was only available in the base library
+-- from version 4.12.0 up to 4.14.3, for some reason
+-- unbeknownst to me. So this piece here defines the function
+-- when the system's GHC base version is outside that range.
+#if MIN_VERSION_base(4,15,0)
+naturalToInt :: Natural -> Int
+naturalToInt = fromInteger . naturalToInteger
+#elif MIN_VERSION_base(4,12,0)
+#else 
+naturalToInt :: Natural -> Int
+naturalToInt = fromInteger . naturalToInteger
+#endif

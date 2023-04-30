@@ -142,9 +142,12 @@ data ExprType = ExprBool | ExprInt
   deriving (Eq, Show)
 
 data IdType = I32 | I64
-  deriving (Show)
+  deriving (Eq, Show)
 
 type Identifier = String
+
+data GhostOrFuncSpec = Ghost | FuncSpec
+  deriving (Eq)
 
 {- | A map that stores all of the type scopes (see 'VarTypes')
  associated with the functions and ghost functions in a VerifiWASM file.
@@ -152,7 +155,7 @@ type Identifier = String
  Since functions and ghost functions share a global namespace, they can be
  given a unique key which is its 'Identifier' without conflicts.
 -}
-type FunTypes = Map Identifier VarTypes
+type FunTypes = Map Identifier (GhostOrFuncSpec, VarTypes)
 
 {- | A map that stores the returned types of ghost functions
  in a VerifiWASM file. Used in the analysis performed
