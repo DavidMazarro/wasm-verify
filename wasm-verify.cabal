@@ -41,6 +41,7 @@ library
     WasmVerify.CFG.Fusion
     WasmVerify.CFG.Types
     WasmVerify.Monad
+    WasmVerify.Paths
 
   build-depends:
     , base
