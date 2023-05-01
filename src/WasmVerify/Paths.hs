@@ -1,25 +1,180 @@
+-----------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------
+
+{- |
+ = Execution path search and related functionality
+
+ TODO: Describe module
+-}
 module WasmVerify.Paths where
 
+import Control.Monad (forM_, unless, when)
 import Control.Monad.State (MonadState (get), State, evalState, modify)
 import Data.Containers.ListUtils (nubOrd)
+import Data.Graph (SCC (..))
+import Data.List (find)
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Maybe
 import Data.Set (Set)
 import qualified Data.Set as Set
+import Data.Text (intercalate, pack)
+import Helpers.ANSI (bold)
+import VerifiWASM.LangTypes as VerifiWASM
 import WasmVerify.CFG.Types
+import WasmVerify.Monad (Failure (Failure), WasmVerify, failWithError)
+
+{- | Given a 'CFG' and a function specification ('VerifiWASM.Function'),
+ this function returns a map that associates each node in the 'CFG' with
+ an 'Assert'. This function makes a couple of checks and assumptions:
+
+  - Assertions can only be __at the entry point__ of 'Node's.
+  This means that the instruction index to which an assertion points
+  must be the first instruction in that 'Node''s block of code.
+  This also implies that assertions cannot be in the middle of a block
+  of code.
+
+  - As a corollary from the previous point, a 'Node' is not allowed to have
+  multiple assertions __unless__ all of them are indexed on the first
+  instruction in that 'Node''s block of code. In that case, they will
+  get transformed into a single assertion by applying a logical AND
+  operation to all of them.
+
+  - The index of an assertion must be inbounds with regards to the
+  number of instructions in the function. Falling out of bounds of the
+  indexed instructions range will result in an out of bounds exception.
+
+  If any of these criteria are not met by the specification, this function
+  will throw a 'Failure'.
+-}
+getNodesAssertsMap :: CFG -> VerifiWASM.Function -> WasmVerify (Map Node Assert)
+getNodesAssertsMap specCFG spec = do
+  nodeLabelsAndAsserts <- mapM (nodeLabelAndAssert specCFG) $ (asserts . funcSpec) spec
+
+  -- We check that all of the asserts have their index pointing
+  -- to the first instruction in the list of instructions in the node,
+  -- i.e. asserts appear in the entry point of nodes.
+  forM_ nodeLabelsAndAsserts (checkAssertAtStart specCFG)
+
+  return $ Map.fromListWith logicAndAsserts nodeLabelsAndAsserts
+  where
+    nodeLabelAndAssert :: CFG -> Assert -> WasmVerify (Node, Assert)
+    nodeLabelAndAssert cfg assert@(Assert (index, _)) = do
+      let mNode = find (isIndexInNode index) $ nodeSet cfg
+      when (isNothing mNode) $ indexOutOfBoundsErr assert cfg
+
+      -- The use of 'fromJust' here is safe because we have
+      -- just checked whether the value is 'Nothing' or not
+      -- (and in that case, we throw a custom failure)
+      return (fromJust mNode, assert)
+    isIndexInNode :: Int -> Node -> Bool
+    isIndexInNode index node =
+      isJust $ find (\instr -> fst instr == index) $ nodeInstructions node
+    checkAssertAtStart :: CFG -> (Node, Assert) -> WasmVerify ()
+    checkAssertAtStart cfg (Node (_, instructions), assert@(Assert (index, _))) =
+      case instructions of
+        -- When the list of instructions is empty, it's the empty exit node
+        -- so we don't have to throw an error.
+        [] -> return ()
+        (firstInstr : _) ->
+          unless (index == fst firstInstr) $ badIndexInvariantErr assert cfg
+    logicAndAsserts :: Assert -> Assert -> Assert
+    -- Used to combine asserts with a logical and.
+    logicAndAsserts (Assert (index, expr1)) (Assert (_, expr2)) =
+      Assert (index, BAnd expr1 expr2)
+    indexOutOfBoundsErr assert cfg =
+      let (index, instr) = lastInstruction cfg
+       in failWithError $
+            Failure $
+              "In function specification "
+                <> (bold . pack . funcName)
+                  spec
+                <> ", the following assertion has an instruction index"
+                <> " that is out of bounds of the instruction range:\n\n"
+                <> (bold . pack . show)
+                  assert
+                <> "\n\nBut the last instruction of the WebAssembly function is:\n\n"
+                <> (bold . pack)
+                  ( show index
+                      <> ": "
+                      <> show instr
+                  )
+    badIndexInvariantErr assert cfg =
+      let instructions = firstInstrEveryNode cfg
+       in failWithError $
+            Failure $
+              "In function specification "
+                <> (bold . pack . funcName)
+                  spec
+                <> ", the following assertion has an instruction index"
+                <> " that points to an instruction in the middle of a block:\n\n"
+                <> (bold . pack . show)
+                  assert
+                <> "\n\nBut assertions can only point to the entry points of blocks.\n"
+                <> "More specifically, these are all the indexed instructions which correspond to"
+                <> " entry points in the control flow of the WebAssembly function:\n\n"
+                <> intercalate
+                  "\n"
+                  [ (bold . pack)
+                      ( show index
+                          <> ": "
+                          <> show instr
+                      )
+                    | (index, instr) <- instructions
+                  ]
+
+{- | Since there must be an invariant (represented with the assert) for
+ every looping part of the WebAssembly program, this check is used to ensure
+ that there's an assert in the specification for the provided strongly connected
+ component of the 'CFG' in the case that it is a 'CyclicSCC' (representing a loop).
+-} -- TODO: Use this function after calling getNodesAssertsMap in the main to check for asserts in SCCs
+checkAssertsForSCC :: VerifiWASM.Function -> Map Node Assert -> SCC Node -> WasmVerify ()
+checkAssertsForSCC spec nodesAssertsMap scc =
+  case scc of
+    AcyclicSCC _ -> return ()
+    CyclicSCC nodes -> do
+      unless (any (isJust . (`Map.lookup` nodesAssertsMap)) nodes) $
+        missingInvariantErr nodes
+  where
+    missingInvariantErr nodes =
+      failWithError $
+        Failure $
+          "In function specification "
+            <> (bold . pack . funcName)
+              spec
+            <> ", there is a loop that has no assertions.\n"
+            <> "Loops should have at least one assertion at the beginning of one of its nodes, "
+            <> "for invariant checking purposes during analysis.\n"
+            <> "These are the blocks of instructions in the loop without assertion:\n----------\n"
+            <> intercalate
+              "\n----------\n"
+              (map (instructionsToText . snd . node) nodes)
+            <> "\n----------\nPlease, add an assertion indexed at the entry point"
+            <> " instruction of one of those code blocks."
+    instructionsToText instructions =
+      intercalate
+        "\n"
+        [ (bold . pack)
+            ( show index
+                <> ": "
+                <> show instr
+            )
+          | (index, instr) <- instructions
+        ]
 
 {- | The list of all execution paths in a 'CFG'. A path is a sequence
  of nodes that are executed. Every path returned by this function
  falls into one of the following types of paths:
 
-    - An execution from the precondition (initial node) to one of
-    the final nodes (postconditions). No asserts found in-between.  
+    - An execution from the initial node (precondition) to one of
+    the final nodes (postconditions). No asserts found in-between.
 
         - In the case of simple WebAssembly functions, it could happen that
         the 'CFG' consists only of one node, which would be both the initial
         and the final node.
 
-    - An execution from the precondition (initial node) to a node
+    - An execution from the initial node (precondition) to a node
     with an assert.
     - An execution from a node with an assert to another node with
     an assert. If the start and end nodes are the same, it represents
@@ -65,8 +220,6 @@ searchPathsFromNode (adjacencyMap, initial, finals) nodesWithAssert paths queue 
   case queue of
     [] -> return paths
     (x : xs) -> do
-      -- TODO: Change condition to check for node in the beginning
-      -- of a cyclic SCC. Use getNodesAssertsMap to check if a node has an assert.
       let newPaths = allPathsWithCondition (`elem` nodesWithAssert) adjacencyMap x
       modify (Set.insert x)
       used <- get
@@ -74,6 +227,9 @@ searchPathsFromNode (adjacencyMap, initial, finals) nodesWithAssert paths queue 
       restOfPaths <- searchPathsFromNode (adjacencyMap, initial, finals) nodesWithAssert paths (xs ++ beacons)
       return $ newPaths ++ restOfPaths
 
+{- | A list of execution paths from the provided node
+ to nodes that either satisfy the provided condition or are final nodes.
+-}
 allPathsWithCondition ::
   -- | The condition in which the search algorithm stops
   -- the search and breaks a path.
@@ -82,8 +238,6 @@ allPathsWithCondition ::
   Map NodeLabel (Set NodeLabel) ->
   -- | The node to search paths from.
   NodeLabel ->
-  -- | A list of execution paths from the provided node
-  -- to nodes that satisfy the provided condition or are final nodes.
   [[NodeLabel]]
 allPathsWithCondition condition adjacencyMap initial
   | adjs == Set.empty = [[initial]]

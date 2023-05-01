@@ -1,5 +1,9 @@
 module WasmVerify.CFG.Types where
 
+import Data.Foldable (maximumBy)
+import Data.List (sortBy)
+import Data.Map (Map)
+import qualified Data.Map as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import GHC.Natural
@@ -89,6 +93,29 @@ nodeLabel (Node (label, _)) = label
 nodeInstructions :: Node -> [IndexedInstruction]
 nodeInstructions (Node (_, instructions)) = instructions
 
+{- | Returns the last instruction in a 'CFG', corresponding
+ to the last instruction in the WebAssembly function.
+-}
+lastInstruction :: CFG -> IndexedInstruction
+lastInstruction cfg =
+  maximumBy
+    (\instr1 instr2 -> compare (fst instr1) (fst instr2))
+    $ concatMap (snd . node)
+    $ nodeSet cfg
+
+{- | Returns the first instruction of every 'Node' in a 'CFG'.
+ These are the entry points of blocks of WebAssembly code.
+ The output is sorted by instruction index.
+-}
+firstInstrEveryNode :: CFG -> [IndexedInstruction]
+firstInstrEveryNode cfg =
+  sortBy
+    (\instr1 instr2 -> compare (fst instr1) (fst instr2))
+    [ head instructions
+      | instructions <- map (snd . node) $ (Set.toList . nodeSet) cfg,
+        not (null instructions)
+    ]
+
 -- | Returns the 'Set' of 'Node's in a 'CFG'.
 nodeSet :: CFG -> Set Node
 nodeSet = fst . cfg
@@ -130,3 +157,18 @@ adjacents cfg (Node (label, _)) =
 adjacentNodeLabels :: NodeLabel -> CFG -> Set NodeLabel
 adjacentNodeLabels label cfg =
   Set.map to . Set.filter ((== label) . from) $ edgeSet cfg
+
+{- | Transforms a 'CFG' from its usual representation into
+ an adjacency map representation for graphs: each node
+ is mapped to a list of its adjacent nodes (see 'adjacents'
+ for our definition of "adjacency").
+-}
+cfgToAdjacencyMap :: CFG -> Map NodeLabel (Set NodeLabel)
+cfgToAdjacencyMap cfg =
+  foldl
+    ( \adjacencyMap node ->
+        let label = nodeLabel node
+         in Map.insert label (adjacentNodeLabels label cfg) adjacencyMap
+    )
+    Map.empty
+    (nodeSet cfg)
