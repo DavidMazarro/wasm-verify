@@ -3,7 +3,7 @@
 
  The version 2.6 standard is published here: <https://smtlib.cs.uiowa.edu/papers/smt-lib-reference-v2.6-r2021-05-12.pdf>.
 -}
-module VerifiWASM.ToSMT where
+module WasmVerify.ToSMT where
 
 import Data.Graph (SCC (..), stronglyConnComp)
 import Data.Map (Map)

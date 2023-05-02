@@ -34,7 +34,6 @@ library
     VerifiWASM.ASTValidator
     VerifiWASM.LangTypes
     VerifiWASM.Parser
-    VerifiWASM.ToSMT
     VerifiWASM.VerifiWASM
     WasmVerify
     WasmVerify.CFG
@@ -42,6 +41,7 @@ library
     WasmVerify.CFG.Types
     WasmVerify.Monad
     WasmVerify.Paths
+    WasmVerify.ToSMT
 
   build-depends:
     , base
