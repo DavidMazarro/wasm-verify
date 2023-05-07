@@ -39,6 +39,7 @@ library
     WasmVerify.CFG
     WasmVerify.CFG.Fusion
     WasmVerify.CFG.Types
+    WasmVerify.Execution
     WasmVerify.Monad
     WasmVerify.Paths
     WasmVerify.ToSMT
