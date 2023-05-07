@@ -296,7 +296,7 @@ identifierParser' allowParens = do
         "i64"
       ]
 
-numberParser :: Parser Int
+numberParser :: Parser Integer
 numberParser = do
   num <- Lexer.decimal
   notFollowedBy (char '(' <|> char '_' <|> letterChar)

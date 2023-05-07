@@ -261,12 +261,18 @@ validateTermination ghostFun (Decreases identifiers) = do
             <> "\nVariables appearing in a termination condition must"
             <> " refer to the arguments of the ghost function."
 
+-- TODO: Ensure that requires is a boolean expression. Add to the list of validations.
+-- TODO: Ensure that requires only reference argument variables. Add to the list of validations.
 validateRequires :: Requires -> VerifiWASM ()
 validateRequires (Requires expr) = void . validateExpr $ expr
 
+-- TODO: Ensure that ensures is a boolean expression. Add to the list of validations.
+-- TODO: Ensure that ensures only reference argument or return variables. Add to the list of validations.
 validateEnsures :: Ensures -> VerifiWASM ()
 validateEnsures (Ensures expr) = void . validateExpr $ expr
 
+-- TODO: Ensure that an assert is a boolean expression. Add to the list of validations.
+-- TODO: Ensure that an assert only references argument or local variables. Add to the list of validations.
 validateAssert :: Assert -> VerifiWASM ()
 validateAssert (Assert (instrIndex, expr)) = do
   when (instrIndex == 0) indexOutOfBoundsErr
@@ -590,7 +596,7 @@ programTypes program@Program{functions, ghostFunctions} = do
       ghostFunctions
   let allVarTypes = functionVarTypes ++ ghostFunctionVarTypes
 
-  return $ foldl M.union M.empty allVarTypes
+  return $ foldr M.union M.empty allVarTypes
   where
     errMsgDups =
       "A duplicate name for a function or ghost function was found. \n"

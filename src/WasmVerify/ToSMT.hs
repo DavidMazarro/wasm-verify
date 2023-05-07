@@ -55,47 +55,46 @@ ghostFunctionsToSMT program =
     bodyMutualToSMT ghostFun =
       "  "
         <> bodyToSMT ghostFun
-    bodyToSMT ghostFun = (exprToSMT Nothing . ghostExpr) ghostFun
+    bodyToSMT ghostFun = (exprToSMT . ghostExpr) ghostFun
     argWithType (identifier, _) =
       "(" <> T.pack identifier <> " " <> "Int" <> ")"
 
 -- TODO: add Haddock
-exprToSMT :: Maybe (Map Identifier IdVersion) -> Expr -> Text
-exprToSMT varMap (FunCall name args) =
+exprToSMT :: Expr -> Text
+exprToSMT (FunCall name args) =
   "("
-    <> foldl (\x y -> x <> " " <> y) (T.pack name) (map (exprToSMT varMap) args)
+    <> foldr ((\x y -> x <> " " <> y) . exprToSMT) (T.pack name) args
     <> ")"
-exprToSMT varMap (IfThenElse condExpr ifExpr elseExpr) =
+exprToSMT (IfThenElse condExpr ifExpr elseExpr) =
   "(ite "
-    <> exprToSMT varMap condExpr
+    <> exprToSMT condExpr
     <> " "
-    <> exprToSMT varMap ifExpr
+    <> exprToSMT ifExpr
     <> " "
-    <> exprToSMT varMap elseExpr
+    <> exprToSMT elseExpr
     <> ")"
-exprToSMT _ BFalse = "false"
-exprToSMT _ BTrue = "true"
-exprToSMT varMap (BNot expr) = unaryToSMT varMap "not" expr
-exprToSMT varMap (BImpl leftExpr rightExpr) = binaryToSMT varMap "=>" leftExpr rightExpr
-exprToSMT varMap (BAnd leftExpr rightExpr) = binaryToSMT varMap "and" leftExpr rightExpr
-exprToSMT varMap (BOr leftExpr rightExpr) = binaryToSMT varMap "or" leftExpr rightExpr
-exprToSMT varMap (BXor leftExpr rightExpr) = binaryToSMT varMap "xor" leftExpr rightExpr
-exprToSMT varMap (BEq leftExpr rightExpr) = binaryToSMT varMap "=" leftExpr rightExpr
-exprToSMT varMap (BDistinct leftExpr rightExpr) = binaryToSMT varMap "distinct" leftExpr rightExpr
-exprToSMT varMap (BLessOrEq leftExpr rightExpr) = binaryToSMT varMap "<=" leftExpr rightExpr
-exprToSMT varMap (BLess leftExpr rightExpr) = binaryToSMT varMap "<" leftExpr rightExpr
-exprToSMT varMap (BGreaterOrEq leftExpr rightExpr) = binaryToSMT varMap ">=" leftExpr rightExpr
-exprToSMT varMap (BGreater leftExpr rightExpr) = binaryToSMT varMap ">" leftExpr rightExpr
-exprToSMT varMap (IVar identifier) =
-  maybe (T.pack identifier) (versionedVarToText . lookupVarVersion identifier) varMap
-exprToSMT _ (IInt n) = T.pack $ show n
-exprToSMT varMap (INeg expr) = unaryToSMT varMap "-" expr
-exprToSMT varMap (IMinus leftExpr rightExpr) = binaryToSMT varMap "-" leftExpr rightExpr
-exprToSMT varMap (IPlus leftExpr rightExpr) = binaryToSMT varMap "+" leftExpr rightExpr
-exprToSMT varMap (IMult leftExpr rightExpr) = binaryToSMT varMap "*" leftExpr rightExpr
-exprToSMT varMap (IDiv leftExpr rightExpr) = binaryToSMT varMap "div" leftExpr rightExpr
-exprToSMT varMap (IMod leftExpr rightExpr) = binaryToSMT varMap "mod" leftExpr rightExpr
-exprToSMT varMap (IAbs expr) = unaryToSMT varMap "abs" expr
+exprToSMT BFalse = "false"
+exprToSMT BTrue = "true"
+exprToSMT (BNot expr) = unaryToSMT "not" expr
+exprToSMT (BImpl leftExpr rightExpr) = binaryToSMT "=>" leftExpr rightExpr
+exprToSMT (BAnd leftExpr rightExpr) = binaryToSMT "and" leftExpr rightExpr
+exprToSMT (BOr leftExpr rightExpr) = binaryToSMT "or" leftExpr rightExpr
+exprToSMT (BXor leftExpr rightExpr) = binaryToSMT "xor" leftExpr rightExpr
+exprToSMT (BEq leftExpr rightExpr) = binaryToSMT "=" leftExpr rightExpr
+exprToSMT (BDistinct leftExpr rightExpr) = binaryToSMT "distinct" leftExpr rightExpr
+exprToSMT (BLessOrEq leftExpr rightExpr) = binaryToSMT "<=" leftExpr rightExpr
+exprToSMT (BLess leftExpr rightExpr) = binaryToSMT "<" leftExpr rightExpr
+exprToSMT (BGreaterOrEq leftExpr rightExpr) = binaryToSMT ">=" leftExpr rightExpr
+exprToSMT (BGreater leftExpr rightExpr) = binaryToSMT ">" leftExpr rightExpr
+exprToSMT (IVar identifier) = T.pack identifier
+exprToSMT (IInt n) = T.pack $ show n
+exprToSMT (INeg expr) = unaryToSMT "-" expr
+exprToSMT (IMinus leftExpr rightExpr) = binaryToSMT "-" leftExpr rightExpr
+exprToSMT (IPlus leftExpr rightExpr) = binaryToSMT "+" leftExpr rightExpr
+exprToSMT (IMult leftExpr rightExpr) = binaryToSMT "*" leftExpr rightExpr
+exprToSMT (IDiv leftExpr rightExpr) = binaryToSMT "div" leftExpr rightExpr
+exprToSMT (IMod leftExpr rightExpr) = binaryToSMT "mod" leftExpr rightExpr
+exprToSMT (IAbs expr) = unaryToSMT "abs" expr
 
 -- TODO: add Haddock
 exprTypeToSMT :: ExprType -> Text
@@ -133,30 +132,15 @@ recursionSets = stronglyConnComp . funDepGraph
 
 -- * Helper functions
 
-{- | We use the dollar sign (\'$\') to keep track
- of the different versions that get created of a variable
- during a symbolic execution of the WebAssembly program.
--}
-versionedVarToText :: VersionedVar -> Text
-versionedVarToText (var, version) =
-  T.pack var <> "$" <> (T.pack . show $ version)
-
-lookupVarVersion :: Identifier -> Map Identifier IdVersion -> VersionedVar
-lookupVarVersion identifier varMap =
-  -- The use of 'Map.!' is safe here because we have populated
-  -- the map with starting versions for all local variables in
-  -- 'executeFunction'.
-  (identifier, varMap Map.! identifier)
+-- TODO: add Haddock
+unaryToSMT :: Text -> Expr -> Text
+unaryToSMT operator expr =
+  "(" <> operator <> " " <> exprToSMT expr <> ")"
 
 -- TODO: add Haddock
-unaryToSMT :: Maybe (Map Identifier IdVersion) -> Text -> Expr -> Text
-unaryToSMT varMap operator expr =
-  "(" <> operator <> " " <> exprToSMT varMap expr <> ")"
-
--- TODO: add Haddock
-binaryToSMT :: Maybe (Map Identifier IdVersion) -> Text -> Expr -> Expr -> Text
-binaryToSMT varMap operator leftExpr rightExpr =
-  "(" <> operator <> " " <> exprToSMT varMap leftExpr <> " " <> exprToSMT varMap rightExpr <> ")"
+binaryToSMT :: Text -> Expr -> Expr -> Text
+binaryToSMT operator leftExpr rightExpr =
+  "(" <> operator <> " " <> exprToSMT leftExpr <> " " <> exprToSMT rightExpr <> ")"
 
 {- | Returns all the names of the ghost functions
  that are called within an expression.
