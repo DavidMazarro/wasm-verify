@@ -56,10 +56,10 @@ data Spec = Spec
 newtype Local = Local {localVars :: [TypedIdentifier]}
   deriving (Show)
 
-newtype Requires = Requires Expr
+newtype Requires = Requires {requiresExpr :: Expr}
   deriving (Eq, Ord, Show)
 
-newtype Ensures = Ensures Expr
+newtype Ensures = Ensures {ensuresExpr :: Expr}
   deriving (Show)
 
 newtype Assert = Assert (Int, Expr)
@@ -127,8 +127,8 @@ data Expr
   | BGreater Expr Expr
   | -- | An integer variable, whose type is derived from the arguments
     IVar Identifier
-  | -- | A wrapper over Haskell 'Int' values to construct integers
-    IInt Int
+  | -- | A wrapper over Haskell 'Integer' values to construct integers
+    IInt Integer
   | INeg Expr
   | IMinus Expr Expr
   | IPlus Expr Expr
@@ -145,6 +145,10 @@ data IdType = I32 | I64
   deriving (Eq, Ord, Show)
 
 type Identifier = String
+
+type IdVersion = Int
+
+type VersionedVar = (Identifier, IdVersion)
 
 data GhostOrFuncSpec = Ghost | FuncSpec
   deriving (Eq)
