@@ -1,6 +1,6 @@
 module WasmVerify.CFG.Types where
 
-import Data.Foldable (maximumBy)
+import Data.Foldable (find, maximumBy)
 import Data.List (sortBy)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -8,6 +8,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import GHC.Natural
 import qualified Language.Wasm.Structure as Wasm
+import Safe.Foldable (findJust)
 
 {- | __Control Flow Graph__, a graph representation of the
  execution flow of a WebAssembly function.
@@ -172,3 +173,9 @@ cfgToAdjacencyMap cfg =
     )
     Map.empty
     (nodeSet cfg)
+
+{- | Returns the 'Node' in a 'CFG' corresponding to the provided 'NodeLabel'.
+ If none of the 'Node's in the 'CFG' have that label, it returns 'Nothing'.
+-}
+getNodeFromLabel :: CFG -> NodeLabel -> Node
+getNodeFromLabel cfg label = findJust ((== label) . nodeLabel) $ nodeSet cfg
