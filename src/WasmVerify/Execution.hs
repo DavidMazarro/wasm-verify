@@ -2,11 +2,12 @@
 
 module WasmVerify.Execution where
 
-import Control.Monad (foldM, forM, forM_, void, when)
+import Control.Monad (foldM, forM, forM_, void)
 import Control.Monad.State (get, gets, modify, put)
-import Data.List (find)
+import Data.List (find, isPrefixOf, sort, stripPrefix)
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Maybe (fromMaybe)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -54,7 +55,7 @@ executeProgram program wasmModule = do
         $ Wasm.exports wasmModule'
     declareAllVersions :: VersionedVar -> WasmVerify ()
     declareAllVersions (identifier, varVersion) = do
-      addVarDeclsSMT [(identifier, version) | version <- [0 .. varVersion]]
+      addVarDeclsSMT [versionedVarToIdentifier (identifier, version) | version <- [0 .. varVersion]]
 
 -- TODO: Initialise locals to the default values corresponding
 -- to their types in the variable version map, and add SMT for
@@ -72,24 +73,38 @@ executeFunction specModule (name, wasmFunction) = do
 
       forM_ sccs (checkAssertsForSCC spec nodesAssertsMap)
 
-      initializeIdentifierMap spec
+      appendToSMT $ "\n;;;;; " <> T.pack (funcName spec) <> "\n\n"
 
       let paths = allExecutionPaths cfgInitialsFinals (map nodeLabel $ Map.keys nodesAssertsMap)
 
-      forM_ paths (executePath spec nodesAssertsMap cfgInitialsFinals)
+      initializeIdentifierMap spec (length paths)
+
+      -- Symbolic execution of all execution paths
+      forM_
+        (zip paths [0 ..])
+        ( \(path, pathIndex) -> do
+            appendToSMT $ ";;; path " <> T.pack (show pathIndex) <> "\n"
+            void $ updateContextPathIndex pathIndex
+            executePath spec nodesAssertsMap cfgInitialsFinals path
+        )
 
       gets identifierMap
 
     -- When the WebAssembly function doesn't have a specification in the VerifiWASM
     -- module, we simply don't perform verification, so our SMT program is empty.
-    Nothing -> return ""
+    Nothing -> return Map.empty
   where
-    initializeIdentifierMap :: VerifiWASM.Function -> WasmVerify ()
-    initializeIdentifierMap spec = do
+    initializeIdentifierMap :: VerifiWASM.Function -> Int -> WasmVerify ()
+    initializeIdentifierMap spec numOfPaths = do
       state <- get
       let numArgs = length $ funcArgs spec
       let numLocals = length $ locals $ funcSpec spec
-      let initialMap = Map.fromList $ [(indexToVar (intToNatural var), 0) | var <- [0 .. numArgs + numLocals - 1]]
+      let initialMap =
+            Map.fromList $
+              [ (funcPathPrefixIdentifier (funcName spec) path $ indexToVar (intToNatural var), 0)
+                | var <- [0 .. numArgs + numLocals - 1],
+                  path <- [0 .. numOfPaths - 1]
+              ]
       put state{identifierMap = initialMap}
 
 -- TODO: During execution, for variables named in the specification, n argument
@@ -99,9 +114,8 @@ executeFunction specModule (name, wasmFunction) = do
 -- r indices in the returned stack (usually, the only returned value
 -- is the top of the stack with just one element).
 
--- TODO: When executing different paths, we have to generate new variables
--- for each path, unused in the other paths. It's like doing different verifications.
--- At the end, we do a check-sat of the whole model with all paths.
+-- TODO: When executing paths, transitions between nodes that have annotations
+-- must be added as an assert with whatever is in the annotation.
 executePath ::
   Function ->
   Map Node Assert ->
@@ -112,7 +126,7 @@ executePath spec nodesAssertsMap (cfg, initial, finals) path = do
   -- Add precondition (requires or assert depending on the first node in the path) to SMT
   varToExprMap <- getVarToExprMap spec
   prePath <- assertionPre varToExprMap $ head path
-  appendToSMT "; pre\n"
+  appendToSMT "\n; pre\n"
   addAssertSMT $ exprToSMT prePath
 
   -- Add the SMT code corresponding to the symbolic execution of the nodes in the path
@@ -132,23 +146,27 @@ executePath spec nodesAssertsMap (cfg, initial, finals) path = do
   postPath <- assertionPost varToExprMapWithReturns $ last path
   addAssertSMT $ exprToSMT postPath
   where
+    -- Used later to substitute named arguments in the 'Requires' clauses with
+    -- the actual variables that are generated during the symbolic execution.
     getVarToExprMap :: Function -> WasmVerify (Map Identifier Expr)
     getVarToExprMap func = do
       let argsWithIndex = zip (funcArgs func) ([0 ..] :: [Int])
       Map.fromList
         <$> ( forM argsWithIndex $ \(arg, index) -> do
-                let var = "var_" <> show index
+                var <- identifierWithContext $ "var_" <> show index
                 varVersion <- lookupVarVersion var
-                identifier <- versionedVarToIdentifier (var, varVersion)
+                let identifier = versionedVarToIdentifier (var, varVersion)
                 return $ (fst arg, IVar identifier)
             )
+    -- Used later to substitute named arguments and the named return variables in the 'Ensures'
+    -- clauses with the actual variables that are generated during the symbolic execution.
     getVarToExprMapWithReturns :: Function -> WasmVerify (Map Identifier Expr)
     getVarToExprMapWithReturns func = do
       varToExprMap <- getVarToExprMap func
       foldM
         ( \varMap ret -> do
             topValue <- popFromStack
-            return $ Map.insert (fst ret) topValue varMap
+            return $ Map.insert (fst ret) (stackValueToExpr topValue) varMap
         )
         varToExprMap
         $ funcReturns func
@@ -182,18 +200,18 @@ executeNode (Node (_, instructions)) =
 -- you already verified the function).
 executeInstruction :: Wasm.Instruction Natural -> WasmVerify ()
 executeInstruction (Wasm.GetLocal index) = do
-  let identifier = indexToVar index
+  identifier <- identifierWithContext $ indexToVar index
   varVersion <- lookupVarVersion identifier
-  stackValue <- ValueVar <$> versionedVarToIdentifier (indexToVar index, varVersion)
+  let stackValue = ValueVar $ versionedVarToIdentifier (identifier, varVersion)
   void $ pushToStack stackValue
 -- TODO: Instead of substituting expressions in the stack, we will add new
 -- variables to the stack and add an assert that makes the expression equal to that variable.
 -- Change the set instruction here.
 executeInstruction (Wasm.SetLocal index) = do
   topValue <- popFromStack
-  let identifier = indexToVar index
-  varVersion <- newVarVersion (indexToVar index)
-  addAssertSMT =<< varEqualsStackValueText (identifier, varVersion) topValue
+  identifier <- identifierWithContext $ indexToVar index
+  varVersion <- newVarVersion identifier
+  addAssertSMT =<< varEqualsExpr (identifier, varVersion) (stackValueToExpr topValue)
 executeInstruction (Wasm.TeeLocal index) = do
   undefined
 executeInstruction (Wasm.I32Const n) = do
@@ -204,12 +222,13 @@ executeInstruction (Wasm.I64Const n) = do
   void . pushToStack $ stackValue
 executeInstruction (Wasm.IRelOp _ relOp) = do
   undefined
--- TODO: Add new res (result) variable in the operations,
--- make that equal to the result of the operation
 executeInstruction (Wasm.IBinOp _ Wasm.IAdd) = do
   topValue2 <- popFromStack
   topValue1 <- popFromStack
-  void . pushToStack $ IPlus topValue1 topValue2
+  (resultVar, version) <- newResultVar
+  let operation = IPlus (stackValueToExpr topValue1) (stackValueToExpr topValue2)
+  addAssertSMT =<< varEqualsExpr (resultVar, version) operation
+  void . pushToStack $ ValueVar $ versionedVarToIdentifier (resultVar, version)
 executeInstruction (Wasm.IBinOp _ binaryOp) = do
   undefined
 executeInstruction (Wasm.Call index) = do
@@ -221,9 +240,31 @@ executeInstruction instruction =
         <> (T.pack . show)
           instruction
 
-{- | Given an the name of a variable (an identifier)
- from WebAssembly, generates a new version of the variable
- from the latest version used in the symbolic execution.
+{- | Returns a fresh result variable to be used in assertions that store
+ the result of WebAssembly computations in 'executeInstruction'. It also inserts that
+ variable in the 'identifierMap' that is part of the execution context ('ExecState').
+ The starting 'IdVersion' for a newly created variable is 0.
+-}
+newResultVar :: WasmVerify VersionedVar
+newResultVar = do
+  state <- get
+  let varMap = identifierMap state
+  resPrefix <- identifierWithContext "res_"
+  let resultVars = filter (resPrefix `isPrefixOf`) $ Map.keys varMap
+  let sortedResultVarsIndices = sort $ map (removePrefix resPrefix) resultVars
+  -- Use of 'read' is a bit unsafe here, but it should be fine because
+  -- we're stripping the whole prefix until only the index remains, so what
+  -- we get should be a number which is what we're trying to read.
+  let newResultVarIndex = if null sortedResultVarsIndices then (0 :: Int) else read (last sortedResultVarsIndices) + 1
+  let freshResultVar = resPrefix <> show newResultVarIndex
+
+  put state{identifierMap = Map.insert freshResultVar 0 (identifierMap state)}
+  return (freshResultVar, 0)
+  where
+    removePrefix prefix original = fromMaybe original $ stripPrefix prefix original
+
+{- | Given the name of a variable (an identifier), generates a new
+ version of the variable from the latest version used in the symbolic execution.
 -}
 newVarVersion :: Identifier -> WasmVerify IdVersion
 newVarVersion identifier = do
@@ -358,23 +399,23 @@ replaceWithVersionedVars _ (IInt n) = return $ IInt n
 replaceWithVersionedVars varToExprMap (INeg expr) =
   INeg <$> replaceWithVersionedVars varToExprMap expr
 replaceWithVersionedVars varToExprMap (IMinus leftExpr rightExpr) =
-  BAnd
+  IMinus
     <$> replaceWithVersionedVars varToExprMap leftExpr
     <*> replaceWithVersionedVars varToExprMap rightExpr
 replaceWithVersionedVars varToExprMap (IPlus leftExpr rightExpr) =
-  BAnd
+  IPlus
     <$> replaceWithVersionedVars varToExprMap leftExpr
     <*> replaceWithVersionedVars varToExprMap rightExpr
 replaceWithVersionedVars varToExprMap (IMult leftExpr rightExpr) =
-  BAnd
+  IMult
     <$> replaceWithVersionedVars varToExprMap leftExpr
     <*> replaceWithVersionedVars varToExprMap rightExpr
 replaceWithVersionedVars varToExprMap (IDiv leftExpr rightExpr) =
-  BAnd
+  IDiv
     <$> replaceWithVersionedVars varToExprMap leftExpr
     <*> replaceWithVersionedVars varToExprMap rightExpr
 replaceWithVersionedVars varToExprMap (IMod leftExpr rightExpr) =
-  BAnd
+  IMod
     <$> replaceWithVersionedVars varToExprMap leftExpr
     <*> replaceWithVersionedVars varToExprMap rightExpr
 replaceWithVersionedVars varToExprMap (IAbs expr) =
@@ -382,18 +423,14 @@ replaceWithVersionedVars varToExprMap (IAbs expr) =
 
 -- * Helper functions
 
-varEqualsStackValueText :: VersionedVar -> StackValue -> WasmVerify Text
-varEqualsStackValueText var stackValue = do
-  identifier <- versionedVarToIdentifier var
-  stackValueText <- stackValueToText stackValue
+varEqualsExpr :: VersionedVar -> Expr -> WasmVerify Text
+varEqualsExpr var stackValue = do
+  let identifier = versionedVarToIdentifier var
+  let stackValueText = exprToSMT stackValue
   return $ "(= " <> T.pack identifier <> " " <> stackValueText <> ")"
 
 indexToVar :: Natural -> Identifier
 indexToVar index = "var_" <> show index
-
-stackValueToText :: StackValue -> WasmVerify Text
-stackValueToText (ValueConst n) = (return . T.pack . show) n
-stackValueToText (ValueVar var) = undefined -- TODO
 
 -- 'naturalToInt' was only available in the base library
 -- from version 4.12.0 up to 4.14.3, for some reason

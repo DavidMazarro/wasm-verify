@@ -13,7 +13,7 @@ import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8Builder)
 import qualified Data.Text.Lazy as Lazy
 import Helpers.ANSI (colorInRed)
-import VerifiWASM.LangTypes (Expr, IdVersion, Identifier, VersionedVar)
+import VerifiWASM.LangTypes (Expr (IInt, IVar), IdVersion, Identifier, VersionedVar)
 
 -- TODO: add Haddock
 type WasmVerify a = ExceptT Failure (StateT ExecState (Writer Builder)) a
@@ -74,14 +74,33 @@ failWithError err = logError err >> throwError err
 
 -- * Helper functions
 
-{- | We use the dollar sign (\'$\') to separate the different
- sections of a variable. The current format is the following:
- @|current function|$|current execution path|$|variable name|$v|variable version|$@
+{- | We use the dollar sign (\'$\') to separate the identifier
+ from the version. The current format is the following:
+ @|identifier|$v|variable version|@.
 -}
-versionedVarToIdentifier :: VersionedVar -> WasmVerify Identifier
-versionedVarToIdentifier (var, version) = do
+versionedVarToIdentifier :: VersionedVar -> Identifier
+versionedVarToIdentifier (var, version) = var <> "$v" <> show version
+
+{- | Prepends the execution context to a variable.
+ We use the dollar sign (\'$\') to separate the different
+ sections of a variable. The current format is the following:
+ @|current function|$|current execution path index|$|variable name@
+-}
+identifierWithContext :: Identifier -> WasmVerify Identifier
+identifierWithContext identifier = do
   (func, path) <- gets executionContext
-  return $ func <> "$" <> "path_" <> show path <> var <> "$v" <> show version
+  return $ funcPathPrefixIdentifier func path identifier
+
+{- | Turns the arguments as an identifier in the following format:
+ @|function name|$|path index|$|identifier@.
+-}
+funcPathPrefixIdentifier :: Identifier -> Int -> Identifier -> Identifier
+funcPathPrefixIdentifier func path identifier =
+  func <> "$" <> "path_" <> show path <> "$" <> identifier
+
+stackValueToExpr :: StackValue -> Expr
+stackValueToExpr (ValueVar identifier) = IVar identifier
+stackValueToExpr (ValueConst n) = IInt n
 
 {- | Prepends a piece of SMT code to the SMT accumulator in the
  'WasmVerify' monad. This function assumes that the code provided
@@ -108,14 +127,14 @@ appendToSMT smtCode = do
 {- | Adds a constant declaration corresponding to the versioned
  variable provided to the SMT accumulator in the 'WasmVerify' monad.
 -}
-addVarDeclsSMT :: [VersionedVar] -> WasmVerify ()
+addVarDeclsSMT :: [Identifier] -> WasmVerify ()
 addVarDeclsSMT vars =
   prependToSMT $
     T.concat $
       map
         ( \var ->
             "(declare-const "
-              <> T.pack (versionedVarToIdentifier var)
+              <> T.pack var
               <> " Int)\n"
         )
         vars
