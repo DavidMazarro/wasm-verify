@@ -267,8 +267,8 @@ identifierParser = identifierParser' False
 identifierParser' :: Bool -> Parser Identifier
 identifierParser' allowParens = do
   underscores <- many $ char '_'
-  letters <- some letterChar -- takeWhile1P (Just "letter character") letterChar
-  rest <- many (alphaNumChar <|> char '_' <|> char '\'')
+  letters <- some letterChar
+  rest <- many (alphaNumChar <|> char '_')
   unless allowParens $ notFollowedBy $ char '('
   let identifier = underscores <> letters <> rest
   checkIsReserved identifier
