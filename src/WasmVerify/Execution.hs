@@ -4,6 +4,7 @@ module WasmVerify.Execution where
 
 import Control.Monad (foldM, forM, forM_, void)
 import Control.Monad.State (get, gets, modify, put)
+import Data.Containers.ListUtils (nubOrd)
 import Data.List (find, isPrefixOf, sort, stripPrefix)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -18,7 +19,7 @@ import GHC.Natural
 import qualified Language.Wasm as Wasm
 import qualified Language.Wasm.Structure as Wasm hiding (Import (desc, name))
 import VerifiWASM.LangTypes
-import qualified VerifiWASM.VerifiWASM as VerifiWASM
+import qualified VerifiWASM.LangTypes as VerifiWASM (Function, Program)
 import WasmVerify.CFG (functionToCFG, stronglyConnCompCFG)
 import WasmVerify.CFG.Types (CFG, Node (Node), NodeLabel, getNodeFromLabel, nodeLabel)
 import WasmVerify.Monad
@@ -27,6 +28,9 @@ import WasmVerify.ToSMT (exprToSMT)
 
 executeProgram :: VerifiWASM.Program -> Wasm.ValidModule -> WasmVerify Lazy.Text
 executeProgram program wasmModule = do
+  -- TODO: What do we do with ghost function preconditions?
+  addGhostFunctionsToSMT program
+
   varMaps <- forM (functions program) $ \func -> do
     -- '(!!)' from lists is safe here by construction of the map of WASM functions,
     -- and 'Map.!' is safe here because we have already validated that there exists
@@ -73,7 +77,7 @@ executeFunction specModule (name, wasmFunction) = do
 
       forM_ sccs (checkAssertsForSCC spec nodesAssertsMap)
 
-      appendToSMT $ "\n;;;;; " <> T.pack (funcName spec) <> "\n\n"
+      appendToSMT $ "\n;;;;; " <> T.pack (funcName spec) <> "\n"
 
       let paths = allExecutionPaths cfgInitialsFinals (map nodeLabel $ Map.keys nodesAssertsMap)
 
@@ -83,7 +87,7 @@ executeFunction specModule (name, wasmFunction) = do
       forM_
         (zip paths [0 ..])
         ( \(path, pathIndex) -> do
-            appendToSMT $ ";;; path " <> T.pack (show pathIndex) <> "\n"
+            appendToSMT $ "\n;;; path " <> T.pack (show pathIndex) <> "\n"
             void $ updateContextPathIndex pathIndex
             executePath spec nodesAssertsMap cfgInitialsFinals path
         )
@@ -98,7 +102,7 @@ executeFunction specModule (name, wasmFunction) = do
     initializeIdentifierMap spec numOfPaths = do
       state <- get
       let numArgs = length $ funcArgs spec
-      let numLocals = length $ locals $ funcSpec spec
+      let numLocals = length $ allLocalsInFunction spec
       let initialMap =
             Map.fromList $
               [ (funcPathPrefixIdentifier (funcName spec) path $ indexToVar (intToNatural var), 0)
@@ -106,13 +110,6 @@ executeFunction specModule (name, wasmFunction) = do
                   path <- [0 .. numOfPaths - 1]
               ]
       put state{identifierMap = initialMap}
-
--- TODO: During execution, for variables named in the specification, n argument
--- variables must be mapped to the first n indices in WebAssembly,
--- m local variables must be mapped to the m indices after n in
--- WebAssembly and the r variables in the return variables must be mapped with
--- r indices in the returned stack (usually, the only returned value
--- is the top of the stack with just one element).
 
 -- TODO: When executing paths, transitions between nodes that have annotations
 -- must be added as an assert with whatever is in the annotation.
@@ -143,14 +140,16 @@ executePath spec nodesAssertsMap (cfg, initial, finals) path = do
   varToExprMapWithReturns <- getVarToExprMapWithReturns spec
   -- Add postcondition (assert or ensures depending on the first node in the path) to SMT
   appendToSMT "\n; post\n"
-  postPath <- assertionPost varToExprMapWithReturns $ last path
+  -- We negate the postcondition, and we will aim for UNSAT to check our
+  -- execution path adheres to the specification
+  postPath <- BNot <$> assertionPost varToExprMapWithReturns (last path)
   addAssertSMT $ exprToSMT postPath
   where
     -- Used later to substitute named arguments in the 'Requires' clauses with
     -- the actual variables that are generated during the symbolic execution.
     getVarToExprMap :: Function -> WasmVerify (Map Identifier Expr)
     getVarToExprMap func = do
-      let argsWithIndex = zip (funcArgs func) ([0 ..] :: [Int])
+      let argsWithIndex = zip (funcArgs func ++ allLocalsInFunction func) ([0 ..] :: [Int])
       Map.fromList
         <$> ( forM argsWithIndex $ \(arg, index) -> do
                 var <- identifierWithContext $ "var_" <> show index
@@ -176,12 +175,14 @@ executePath spec nodesAssertsMap (cfg, initial, finals) path = do
     assertionPre varToExprMap label
       | label == initial =
           (replaceWithVersionedVars varToExprMap . requiresExpr . requires . funcSpec) spec
-      | otherwise = undefined -- TODO: nodesAssertsMap Map.! (getNodeFromLabel nodeLabel)
+      | otherwise =
+          (replaceWithVersionedVars varToExprMap . snd . unAssert) (nodesAssertsMap Map.! (getNodeFromLabel cfg label))
     assertionPost :: Map Identifier Expr -> NodeLabel -> WasmVerify Expr
     assertionPost varToExprMap label
       | isFinalNode label =
           (replaceWithVersionedVars varToExprMap . ensuresExpr . ensures . funcSpec) spec
-      | otherwise = undefined -- TODO: nodesAssertsMap Map.! (getNodeFromLabel nodeLabel)
+      | otherwise =
+          (replaceWithVersionedVars varToExprMap . snd . unAssert) (nodesAssertsMap Map.! (getNodeFromLabel cfg label))
 
 executeNodesInPath :: [Node] -> WasmVerify ()
 executeNodesInPath nodes = do
@@ -199,14 +200,16 @@ executeNode (Node (_, instructions)) =
 -- you check the precondition and assume the poscondition holds (because
 -- you already verified the function).
 executeInstruction :: Wasm.Instruction Natural -> WasmVerify ()
+executeInstruction (Wasm.Block _ _) = return ()
+executeInstruction (Wasm.Loop _ _) = return ()
+executeInstruction (Wasm.Br _) = return ()
+executeInstruction (Wasm.BrIf _) = return ()
+executeInstruction Wasm.Return = return ()
 executeInstruction (Wasm.GetLocal index) = do
   identifier <- identifierWithContext $ indexToVar index
   varVersion <- lookupVarVersion identifier
   let stackValue = ValueVar $ versionedVarToIdentifier (identifier, varVersion)
   void $ pushToStack stackValue
--- TODO: Instead of substituting expressions in the stack, we will add new
--- variables to the stack and add an assert that makes the expression equal to that variable.
--- Change the set instruction here.
 executeInstruction (Wasm.SetLocal index) = do
   topValue <- popFromStack
   identifier <- identifierWithContext $ indexToVar index
@@ -221,24 +224,91 @@ executeInstruction (Wasm.I64Const n) = do
   let stackValue = ValueConst $ toInteger n
   void . pushToStack $ stackValue
 executeInstruction (Wasm.IRelOp _ relOp) = do
-  undefined
-executeInstruction (Wasm.IBinOp _ Wasm.IAdd) = do
-  topValue2 <- popFromStack
-  topValue1 <- popFromStack
+  operationResult <- executeIRelOp relOp
   (resultVar, version) <- newResultVar
-  let operation = IPlus (stackValueToExpr topValue1) (stackValueToExpr topValue2)
-  addAssertSMT =<< varEqualsExpr (resultVar, version) operation
+  addAssertSMT =<< varEqualsExpr (resultVar, version) operationResult
   void . pushToStack $ ValueVar $ versionedVarToIdentifier (resultVar, version)
-executeInstruction (Wasm.IBinOp _ binaryOp) = do
-  undefined
-executeInstruction (Wasm.Call index) = do
-  undefined
+executeInstruction (Wasm.IBinOp _ binOp) = do
+  operationResult <- executeIBinOp binOp
+  (resultVar, version) <- newResultVar
+  addAssertSMT =<< varEqualsExpr (resultVar, version) operationResult
+  void . pushToStack $ ValueVar $ versionedVarToIdentifier (resultVar, version)
+-- executeInstruction (Wasm.Call index) = do
+--   undefined
 executeInstruction instruction =
   failWithError $
     Failure $
-      "Unsupported instruction: "
+      "Unsupported WebAssembly instruction: "
         <> (T.pack . show)
           instruction
+
+executeIBinOp :: Wasm.IBinOp -> WasmVerify Expr
+executeIBinOp binOp = do
+  topValue2 <- popFromStack
+  topValue1 <- popFromStack
+  case binOp of
+    Wasm.IAdd -> return $ IPlus (stackValueToExpr topValue1) (stackValueToExpr topValue2)
+    Wasm.ISub -> return $ IMinus (stackValueToExpr topValue1) (stackValueToExpr topValue2)
+    Wasm.IMul -> return $ IMult (stackValueToExpr topValue1) (stackValueToExpr topValue2)
+    Wasm.IRemS -> return $ IMod (stackValueToExpr topValue1) (stackValueToExpr topValue2)
+    _ -> unsupportedIBinOpErr >> return BFalse
+  where
+    unsupportedIBinOpErr =
+      failWithError $
+        Failure $
+          "Unsupported WebAssembly integer arithmetic operation: "
+            <> (T.pack . show)
+              binOp
+
+executeIRelOp :: Wasm.IRelOp -> WasmVerify Expr
+executeIRelOp binOp = do
+  topValue2 <- popFromStack
+  topValue1 <- popFromStack
+  case binOp of
+    Wasm.IEq ->
+      return $
+        IfThenElse
+          (BEq (stackValueToExpr topValue1) (stackValueToExpr topValue2))
+          (IInt 1)
+          (IInt 0)
+    Wasm.INe ->
+      return $
+        IfThenElse
+          (BDistinct (stackValueToExpr topValue1) (stackValueToExpr topValue2))
+          (IInt 1)
+          (IInt 0)
+    Wasm.ILtS ->
+      return $
+        IfThenElse
+          (BLess (stackValueToExpr topValue1) (stackValueToExpr topValue2))
+          (IInt 1)
+          (IInt 0)
+    Wasm.IGtS ->
+      return $
+        IfThenElse
+          (BGreater (stackValueToExpr topValue1) (stackValueToExpr topValue2))
+          (IInt 1)
+          (IInt 0)
+    Wasm.ILeS ->
+      return $
+        IfThenElse
+          (BLessOrEq (stackValueToExpr topValue1) (stackValueToExpr topValue2))
+          (IInt 1)
+          (IInt 0)
+    Wasm.IGeS ->
+      return $
+        IfThenElse
+          (BGreaterOrEq (stackValueToExpr topValue1) (stackValueToExpr topValue2))
+          (IInt 1)
+          (IInt 0)
+    _ -> unsupportedIBinOpErr >> return BFalse
+  where
+    unsupportedIBinOpErr =
+      failWithError $
+        Failure $
+          "Unsupported WebAssembly integer comparison operation: "
+            <> (T.pack . show)
+              binOp
 
 {- | Returns a fresh result variable to be used in assertions that store
  the result of WebAssembly computations in 'executeInstruction'. It also inserts that
@@ -423,14 +493,23 @@ replaceWithVersionedVars varToExprMap (IAbs expr) =
 
 -- * Helper functions
 
+-- Returns SMT code for when a versioned variable is equals
+-- to a VerifiWASM expression (which gets formatted as SMT).
 varEqualsExpr :: VersionedVar -> Expr -> WasmVerify Text
 varEqualsExpr var stackValue = do
   let identifier = versionedVarToIdentifier var
   let stackValueText = exprToSMT stackValue
   return $ "(= " <> T.pack identifier <> " " <> stackValueText <> ")"
 
+-- | Transforms a WebAssembly index into a variable.
 indexToVar :: Natural -> Identifier
 indexToVar index = "var_" <> show index
+
+{- | Gets all of the local variables in a function, across the
+ different 'Local' declarations found in the 'Spec'.
+-}
+allLocalsInFunction :: Function -> [TypedIdentifier]
+allLocalsInFunction func = nubOrd $ concatMap localVars $ (locals . funcSpec) func
 
 -- 'naturalToInt' was only available in the base library
 -- from version 4.12.0 up to 4.14.3, for some reason

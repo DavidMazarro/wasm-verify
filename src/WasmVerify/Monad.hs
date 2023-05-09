@@ -13,7 +13,8 @@ import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8Builder)
 import qualified Data.Text.Lazy as Lazy
 import Helpers.ANSI (colorInRed)
-import VerifiWASM.LangTypes (Expr (IInt, IVar), IdVersion, Identifier, VersionedVar)
+import VerifiWASM.LangTypes (Expr (IInt, IVar), IdVersion, Identifier, VersionedVar, Program)
+import WasmVerify.ToSMT (ghostFunctionsToSMT)
 
 -- TODO: add Haddock
 type WasmVerify a = ExceptT Failure (StateT ExecState (Writer Builder)) a
@@ -123,6 +124,10 @@ appendToSMT smtCode = do
   let smt = smtText state
   let updatedSmt = smt <> Lazy.fromStrict smtCode
   put state{smtText = updatedSmt}
+
+addGhostFunctionsToSMT :: Program -> WasmVerify ()
+addGhostFunctionsToSMT program =
+  appendToSMT $ "\n" <> ghostFunctionsToSMT program <> "\n"
 
 {- | Adds a constant declaration corresponding to the versioned
  variable provided to the SMT accumulator in the 'WasmVerify' monad.

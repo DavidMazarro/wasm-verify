@@ -63,7 +63,10 @@ ghostFunctionsToSMT program =
 exprToSMT :: Expr -> Text
 exprToSMT (FunCall name args) =
   "("
-    <> foldr ((\x y -> x <> " " <> y) . exprToSMT) (T.pack name) args
+    <> T.pack name
+    <> " "
+    <> intercalate " " (map exprToSMT args)
+    -- <> foldr ((\x y -> x <> " " <> y) . exprToSMT) (T.pack name) args
     <> ")"
 exprToSMT (IfThenElse condExpr ifExpr elseExpr) =
   "(ite "

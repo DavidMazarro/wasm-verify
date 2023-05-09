@@ -62,7 +62,7 @@ newtype Requires = Requires {requiresExpr :: Expr}
 newtype Ensures = Ensures {ensuresExpr :: Expr}
   deriving (Show)
 
-newtype Assert = Assert (Int, Expr)
+newtype Assert = Assert {unAssert :: (Int, Expr)}
   deriving (Show)
 
 data Declaration
