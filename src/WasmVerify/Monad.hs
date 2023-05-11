@@ -13,7 +13,7 @@ import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8Builder)
 import qualified Data.Text.Lazy as Lazy
 import Helpers.ANSI (colorInRed)
-import VerifiWASM.LangTypes (Expr (IInt, IVar), IdVersion, Identifier, VersionedVar, Program)
+import VerifiWASM.LangTypes (Expr (IInt, IVar), IdVersion, Identifier, Program, VersionedVar)
 import WasmVerify.ToSMT (ghostFunctionsToSMT)
 
 -- TODO: add Haddock
@@ -82,26 +82,19 @@ failWithError err = logError err >> throwError err
 versionedVarToIdentifier :: VersionedVar -> Identifier
 versionedVarToIdentifier (var, version) = var <> "$v" <> show version
 
-{- | Prepends the execution context to a variable.
- We use the dollar sign (\'$\') to separate the different
- sections of a variable. The current format is the following:
- @|current function|$|current execution path index|$|variable name@
+{- | Turns a value in the stack of the symbolic execution
+ into an expression: if there's a variable, into an 'IVar' expression
+ and if there's a constant number, into a  'IInt' expression.
 -}
-identifierWithContext :: Identifier -> WasmVerify Identifier
-identifierWithContext identifier = do
-  (func, path) <- gets executionContext
-  return $ funcPathPrefixIdentifier func path identifier
-
-{- | Turns the arguments as an identifier in the following format:
- @|function name|$|path index|$|identifier@.
--}
-funcPathPrefixIdentifier :: Identifier -> Int -> Identifier -> Identifier
-funcPathPrefixIdentifier func path identifier =
-  func <> "$" <> "path_" <> show path <> "$" <> identifier
-
 stackValueToExpr :: StackValue -> Expr
 stackValueToExpr (ValueVar identifier) = IVar identifier
 stackValueToExpr (ValueConst n) = IInt n
+
+{- | Cleans the current SMT accumulator to allow for a new execution
+ path or function as a different SMT program.
+-}
+cleanSMT :: WasmVerify ()
+cleanSMT = get >>= (\state -> put state{smtText = ""})
 
 {- | Prepends a piece of SMT code to the SMT accumulator in the
  'WasmVerify' monad. This function assumes that the code provided

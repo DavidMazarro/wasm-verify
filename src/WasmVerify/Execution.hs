@@ -26,26 +26,19 @@ import WasmVerify.Monad
 import WasmVerify.Paths (allExecutionPaths, checkAssertsForSCC, getNodesAssertsMap)
 import WasmVerify.ToSMT (exprToSMT)
 
-executeProgram :: VerifiWASM.Program -> Wasm.ValidModule -> WasmVerify Lazy.Text
-executeProgram program wasmModule = do
-  -- TODO: What do we do with ghost function preconditions?
-  addGhostFunctionsToSMT program
-
-  varMaps <- forM (functions program) $ \func -> do
-    -- '(!!)' from lists is safe here by construction of the map of WASM functions,
-    -- and 'Map.!' is safe here because we have already validated that there exists
-    -- a WASM function for each of the specs in the VerifiWASM program (see 'ASTValidator.validate')
-    let wasmFunction = (Wasm.functions . Wasm.getModule $ wasmModule) !! (wasmFunctions Map.! funcName func)
-    executeFunction program (funcName func, wasmFunction)
-
-  -- Declare SMT variables for all functions
-  -- TODO: This reverse here is temporary. It should be unnecessary
-  -- to make the variables be declared in ascending order.
-  forM_ varMaps (\varMap -> forM_ (reverse $ Map.assocs varMap) declareAllVersions)
-
-  addSetLogicSMT "QF_UFLIA"
-  addCheckSatSMT
-  gets smtText
+executeProgram :: VerifiWASM.Program -> Wasm.ValidModule -> WasmVerify (Map Identifier [Lazy.Text])
+executeProgram program wasmModule =
+  foldM
+    ( \smtMap func -> do
+        -- '(!!)' from lists is safe here by construction of the map of WASM functions,
+        -- and 'Map.!' is safe here because we have already validated that there exists
+        -- a WASM function for each of the specs in the VerifiWASM program (see 'ASTValidator.validate')
+        let wasmFunction = (Wasm.functions . Wasm.getModule $ wasmModule) !! (wasmFunctions Map.! funcName func)
+        smtFunction <- executeFunction program (funcName func, wasmFunction)
+        return $ Map.insert (funcName func) smtFunction smtMap
+    )
+    Map.empty
+    $ functions program
   where
     wasmFunctions = getFunctionIndicesFromExports $ Wasm.getModule wasmModule
     getFunctionIndicesFromExports :: Wasm.Module -> Map Identifier Int
@@ -57,17 +50,14 @@ executeProgram program wasmModule = do
         )
         Map.empty
         $ Wasm.exports wasmModule'
-    declareAllVersions :: VersionedVar -> WasmVerify ()
-    declareAllVersions (identifier, varVersion) = do
-      addVarDeclsSMT [versionedVarToIdentifier (identifier, version) | version <- [0 .. varVersion]]
 
 -- TODO: Initialise locals to the default values corresponding
 -- to their types in the variable version map, and add SMT for
 -- those default values. Do the same thing for arguments, but
 -- adding SMT matching the precondition in the specification.
-executeFunction :: VerifiWASM.Program -> (Identifier, Wasm.Function) -> WasmVerify (Map Identifier IdVersion)
+executeFunction :: VerifiWASM.Program -> (Identifier, Wasm.Function) -> WasmVerify [Lazy.Text]
 executeFunction specModule (name, wasmFunction) = do
-  void $ updateContextFunction name
+  cleanSMT
   let mSpec = find ((== name) . funcName) $ functions specModule
   case mSpec of
     (Just spec) -> do
@@ -77,55 +67,48 @@ executeFunction specModule (name, wasmFunction) = do
 
       forM_ sccs (checkAssertsForSCC spec nodesAssertsMap)
 
-      appendToSMT $ "\n;;;;; " <> T.pack (funcName spec) <> "\n"
-
       let paths = allExecutionPaths cfgInitialsFinals (map nodeLabel $ Map.keys nodesAssertsMap)
 
-      initializeIdentifierMap spec (length paths)
-
       -- Symbolic execution of all execution paths
-      forM_
+      forM
         (zip paths [0 ..])
-        ( \(path, pathIndex) -> do
-            appendToSMT $ "\n;;; path " <> T.pack (show pathIndex) <> "\n"
-            void $ updateContextPathIndex pathIndex
-            executePath spec nodesAssertsMap cfgInitialsFinals path
+        ( \(path, pathIndex) ->
+            executePath specModule spec nodesAssertsMap cfgInitialsFinals pathIndex path
         )
-
-      gets identifierMap
 
     -- When the WebAssembly function doesn't have a specification in the VerifiWASM
     -- module, we simply don't perform verification, so our SMT program is empty.
-    Nothing -> return Map.empty
-  where
-    initializeIdentifierMap :: VerifiWASM.Function -> Int -> WasmVerify ()
-    initializeIdentifierMap spec numOfPaths = do
-      state <- get
-      let numArgs = length $ funcArgs spec
-      let numLocals = length $ allLocalsInFunction spec
-      let initialMap =
-            Map.fromList $
-              [ (funcPathPrefixIdentifier (funcName spec) path $ indexToVar (intToNatural var), 0)
-                | var <- [0 .. numArgs + numLocals - 1],
-                  path <- [0 .. numOfPaths - 1]
-              ]
-      put state{identifierMap = initialMap}
+    Nothing -> return []
 
 -- TODO: When executing paths, transitions between nodes that have annotations
 -- must be added as an assert with whatever is in the annotation.
 executePath ::
+  VerifiWASM.Program ->
   Function ->
   Map Node Assert ->
   (CFG, NodeLabel, Set NodeLabel) ->
+  Int ->
   [NodeLabel] ->
-  WasmVerify ()
-executePath spec nodesAssertsMap (cfg, initial, finals) path = do
+  WasmVerify Lazy.Text
+executePath specModule spec nodesAssertsMap (cfg, initial, finals) pathIndex path = do
+  cleanSMT
+  -- TODO: What do we do with ghost function preconditions?
+  addGhostFunctionsToSMT specModule
+
+  appendToSMT $ "\n;;;;; " <> T.pack (funcName spec) <> "\n"
+
+  appendToSMT $ "\n;;; path " <> T.pack (show pathIndex) <> "\n"
+
+  initializeIdentifierMap spec
+
+  -- PRECONDITION
   -- Add precondition (requires or assert depending on the first node in the path) to SMT
   varToExprMap <- getVarToExprMap spec
   prePath <- assertionPre varToExprMap $ head path
   appendToSMT "\n; pre\n"
   addAssertSMT $ exprToSMT prePath
 
+  -- SYMBOLIC EXECUTION
   -- Add the SMT code corresponding to the symbolic execution of the nodes in the path
   let lastNodeInPath = last path
   executeNodesInPath $
@@ -137,6 +120,7 @@ executePath spec nodesAssertsMap (cfg, initial, finals) path = do
       -- in its respective path and is not executed in the current path.
       (if isFinalNode lastNodeInPath then path else init path)
 
+  -- POSTCONDITION
   varToExprMapWithReturns <- getVarToExprMapWithReturns spec
   -- Add postcondition (assert or ensures depending on the first node in the path) to SMT
   appendToSMT "\n; post\n"
@@ -144,7 +128,28 @@ executePath spec nodesAssertsMap (cfg, initial, finals) path = do
   -- execution path adheres to the specification
   postPath <- BNot <$> assertionPost varToExprMapWithReturns (last path)
   addAssertSMT $ exprToSMT postPath
+
+  -- Declare SMT variables for all functions
+  -- TODO: This reverse here is temporary. It should be unnecessary
+  -- to make the variables be declared in ascending order.
+  varMap <- gets identifierMap
+  forM_ (reverse $ Map.assocs varMap) declareAllVarVersions
+
+  addSetLogicSMT "QF_UFLIA"
+  addCheckSatSMT
+  gets smtText
   where
+    initializeIdentifierMap :: VerifiWASM.Function -> WasmVerify ()
+    initializeIdentifierMap func = do
+      state <- get
+      let numArgs = length $ funcArgs func
+      let numLocals = length $ allLocalsInFunction func
+      let initialMap =
+            Map.fromList $
+              [ (indexToVar (intToNatural var), 0)
+                | var <- [0 .. numArgs + numLocals - 1]
+              ]
+      put state{identifierMap = initialMap}
     -- Used later to substitute named arguments in the 'Requires' clauses with
     -- the actual variables that are generated during the symbolic execution.
     getVarToExprMap :: Function -> WasmVerify (Map Identifier Expr)
@@ -152,7 +157,7 @@ executePath spec nodesAssertsMap (cfg, initial, finals) path = do
       let argsWithIndex = zip (funcArgs func ++ allLocalsInFunction func) ([0 ..] :: [Int])
       Map.fromList
         <$> ( forM argsWithIndex $ \(arg, index) -> do
-                var <- identifierWithContext $ "var_" <> show index
+                let var = "var_" <> show index
                 varVersion <- lookupVarVersion var
                 let identifier = versionedVarToIdentifier (var, varVersion)
                 return $ (fst arg, IVar identifier)
@@ -183,6 +188,9 @@ executePath spec nodesAssertsMap (cfg, initial, finals) path = do
           (replaceWithVersionedVars varToExprMap . ensuresExpr . ensures . funcSpec) spec
       | otherwise =
           (replaceWithVersionedVars varToExprMap . snd . unAssert) (nodesAssertsMap Map.! (getNodeFromLabel cfg label))
+    declareAllVarVersions :: VersionedVar -> WasmVerify ()
+    declareAllVarVersions (identifier, varVersion) = do
+      addVarDeclsSMT [versionedVarToIdentifier (identifier, version) | version <- [0 .. varVersion]]
 
 executeNodesInPath :: [Node] -> WasmVerify ()
 executeNodesInPath nodes = do
@@ -206,13 +214,13 @@ executeInstruction (Wasm.Br _) = return ()
 executeInstruction (Wasm.BrIf _) = return ()
 executeInstruction Wasm.Return = return ()
 executeInstruction (Wasm.GetLocal index) = do
-  identifier <- identifierWithContext $ indexToVar index
+  let identifier = indexToVar index
   varVersion <- lookupVarVersion identifier
   let stackValue = ValueVar $ versionedVarToIdentifier (identifier, varVersion)
   void $ pushToStack stackValue
 executeInstruction (Wasm.SetLocal index) = do
   topValue <- popFromStack
-  identifier <- identifierWithContext $ indexToVar index
+  let identifier = indexToVar index
   varVersion <- newVarVersion identifier
   addAssertSMT =<< varEqualsExpr (identifier, varVersion) (stackValueToExpr topValue)
 executeInstruction (Wasm.TeeLocal index) = do
@@ -319,7 +327,7 @@ newResultVar :: WasmVerify VersionedVar
 newResultVar = do
   state <- get
   let varMap = identifierMap state
-  resPrefix <- identifierWithContext "res_"
+  let resPrefix = "res_"
   let resultVars = filter (resPrefix `isPrefixOf`) $ Map.keys varMap
   let sortedResultVarsIndices = sort $ map (removePrefix resPrefix) resultVars
   -- Use of 'read' is a bit unsafe here, but it should be fine because
@@ -384,28 +392,6 @@ popFromStack = do
   let newState = state{symbolicStack = restOfStack}
   put newState
   return topValue
-
-{- | Update the execution context with the provided name of the
- function that is currently being executed.
--}
-updateContextFunction :: Identifier -> WasmVerify (Identifier, Int)
-updateContextFunction name = do
-  state <- get
-  let (_, index) = executionContext state
-  let newState = state{executionContext = (name, index)}
-  put newState
-  return (name, index)
-
-{- | Update the execution context with the provided index of the
- execution path that is currently being executed.
--}
-updateContextPathIndex :: Int -> WasmVerify (Identifier, Int)
-updateContextPathIndex index = do
-  state <- get
-  let (name, _) = executionContext state
-  let newState = state{executionContext = (name, index)}
-  put newState
-  return (name, index)
 
 {- | Replaces the variables found in an expression with the
  versioned variable version, corresponding to the latest version
