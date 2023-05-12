@@ -16,7 +16,8 @@ import VerifiWASM.LangTypes
 -- TODO: add Haddock
 ghostFunctionsToSMT :: Program -> Text
 ghostFunctionsToSMT program =
-  intercalate "\n\n" $ map recursionSetToSMT $ recursionSets program
+  let ghostFunDecls = map recursionSetToSMT $ recursionSets program
+   in if null ghostFunDecls then "" else "\n" <> intercalate "\n\n" ghostFunDecls <> "\n"
   where
     recursionSetToSMT :: SCC GhostFunction -> Text
     recursionSetToSMT scc =

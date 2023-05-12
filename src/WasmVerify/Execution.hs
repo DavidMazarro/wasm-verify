@@ -195,7 +195,8 @@ executePath specModule spec nodesAssertsMap (cfg, initial, finals) pathIndex pat
 executeNodesInPath :: [Node] -> WasmVerify ()
 executeNodesInPath nodes = do
   appendToSMT "\n; code symbolic execution\n"
-  forM_ nodes executeNode
+  forM_ (zip nodes ([0 ..] :: [Int])) $ \(node, indexInPath) -> do
+    executeNode node
   void $ gets smtText >>= (\x -> traceShow x (return x))
 
 executeNode :: Node -> WasmVerify ()
@@ -223,8 +224,9 @@ executeInstruction (Wasm.SetLocal index) = do
   let identifier = indexToVar index
   varVersion <- newVarVersion identifier
   addAssertSMT =<< varEqualsExpr (identifier, varVersion) (stackValueToExpr topValue)
-executeInstruction (Wasm.TeeLocal index) = do
-  undefined
+-- TODO: Add support for tee
+-- executeInstruction (Wasm.TeeLocal index) = do
+--   undefined
 executeInstruction (Wasm.I32Const n) = do
   let stackValue = ValueConst $ toInteger n
   void . pushToStack $ stackValue
@@ -371,10 +373,8 @@ lookupVarVersion identifier = do
 -}
 pushToStack :: StackValue -> WasmVerify [StackValue]
 pushToStack value = do
-  state <- get
-  let newState = state{symbolicStack = value : (symbolicStack state)}
-  put newState
-  return $ symbolicStack newState
+  modify (\state -> state{symbolicStack = value : (symbolicStack state)})
+  gets symbolicStack
 
 {- | Pops the last value from the top of the symbolic
  execution stack, removing it from the stack and returning

@@ -2,7 +2,7 @@ module WasmVerify.Monad where
 
 import Control.Exception (Exception)
 import Control.Monad.Except
-import Control.Monad.State (StateT, evalStateT, get, gets, put)
+import Control.Monad.State (StateT, evalStateT, get, modify, put)
 import Control.Monad.Trans.Writer.CPS
 import Data.ByteString.Builder (Builder, toLazyByteString)
 import qualified Data.ByteString.Lazy as BS (putStr)
@@ -14,6 +14,7 @@ import Data.Text.Encoding (encodeUtf8Builder)
 import qualified Data.Text.Lazy as Lazy
 import Helpers.ANSI (colorInRed)
 import VerifiWASM.LangTypes (Expr (IInt, IVar), IdVersion, Identifier, Program, VersionedVar)
+import WasmVerify.CFG.Types (NodeLabel)
 import WasmVerify.ToSMT (ghostFunctionsToSMT)
 
 -- TODO: add Haddock
@@ -32,10 +33,10 @@ data ExecState = ExecState
     -- | The simulated stack used when performing the symbolic execution
     -- of the WebAssembly instructions.
     symbolicStack :: [StackValue],
-    -- | The current symbolic execution context, i.e. which WebAssembly
-    -- function is being executed and which execution path is being executed
-    -- (represented as a position index in the list of all execution paths).
-    executionContext :: (Identifier, Int),
+    -- | The current node symbolic execution context, i.e. which node is currently
+    -- being executed and which is the node that will be executed next (if there's one),
+    -- in the execution path that is currently being executed.
+    nodeExecutionContext :: (NodeLabel, Maybe NodeLabel),
     -- | A text accumulator that keeps adding SMT. After performing
     -- all of the symbolic execution, this value is our SMTLIB2 program
     -- that will be run and output the result of the verification.
@@ -59,7 +60,7 @@ runWasmVerify action = do
     Right x -> pure x
     Left err -> error $ show $ unFailure err
   where
-    emptyContextState = ExecState M.empty [] ("", 0) ""
+    emptyContextState = ExecState M.empty [] (0, Nothing) ""
 
 -- | Provides an easy action for logging within 'WasmVerify' contexts.
 logError :: Failure -> WasmVerify ()
@@ -94,33 +95,26 @@ stackValueToExpr (ValueConst n) = IInt n
  path or function as a different SMT program.
 -}
 cleanSMT :: WasmVerify ()
-cleanSMT = get >>= (\state -> put state{smtText = ""})
+cleanSMT = modify (\state -> state{smtText = ""})
 
 {- | Prepends a piece of SMT code to the SMT accumulator in the
  'WasmVerify' monad. This function assumes that the code provided
  is valid SMT, since arbitrary text can be inserted in the accumulator.
 -}
 prependToSMT :: Text -> WasmVerify ()
-prependToSMT smtCode = do
-  state <- get
-  let smt = smtText state
-  let updatedSmt = Lazy.fromStrict smtCode <> smt
-  put state{smtText = updatedSmt}
+prependToSMT smtCode =
+  modify (\state -> state{smtText = Lazy.fromStrict smtCode <> smtText state})
 
 {- | Appends a piece of SMT code to the SMT accumulator in the
  'WasmVerify' monad. This function assumes that the code provided
  is valid SMT, since arbitrary text can be inserted in the accumulator.
 -}
 appendToSMT :: Text -> WasmVerify ()
-appendToSMT smtCode = do
-  state <- get
-  let smt = smtText state
-  let updatedSmt = smt <> Lazy.fromStrict smtCode
-  put state{smtText = updatedSmt}
+appendToSMT smtCode =
+  modify (\state -> state{smtText = smtText state <> Lazy.fromStrict smtCode})
 
 addGhostFunctionsToSMT :: Program -> WasmVerify ()
-addGhostFunctionsToSMT program =
-  appendToSMT $ "\n" <> ghostFunctionsToSMT program <> "\n"
+addGhostFunctionsToSMT = appendToSMT . ghostFunctionsToSMT
 
 {- | Adds a constant declaration corresponding to the versioned
  variable provided to the SMT accumulator in the 'WasmVerify' monad.
