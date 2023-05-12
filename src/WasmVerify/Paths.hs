@@ -124,6 +124,14 @@ getNodesAssertsMap specCFG spec = do
                     | (index, instr) <- instructions
                   ]
 
+{- | Returns the 'Annotation' corresponding to the transition
+ from the first 'NodeLabel' argument to the second one.
+ If there's no edge between those nodes, it returns 'Nothing'.
+-}
+getTransitionAnnotation :: CFG -> NodeLabel -> NodeLabel -> Maybe Annotation
+getTransitionAnnotation cfg from to =
+  annotation <$> find (\(Edge from' _ to') -> from == from' && to == to') (edgeSet cfg)
+
 {- | Since there must be an invariant (represented with the assert) for
  every looping part of the WebAssembly program, this check is used to ensure
  that there's an assert in the specification for the provided strongly connected

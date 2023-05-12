@@ -2,19 +2,19 @@
 
 module WasmVerify.Execution where
 
-import Control.Monad (foldM, forM, forM_, void)
+import Control.Monad (foldM, forM, forM_, void, when)
 import Control.Monad.State (get, gets, modify, put)
 import Data.Containers.ListUtils (nubOrd)
 import Data.List (find, isPrefixOf, sort, stripPrefix)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromJust, fromMaybe, isJust)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as Lazy
-import Debug.Trace (traceShow)
+import Debug.Trace (trace, traceShow)
 import GHC.Natural
 import qualified Language.Wasm as Wasm
 import qualified Language.Wasm.Structure as Wasm hiding (Import (desc, name))
@@ -23,7 +23,7 @@ import qualified VerifiWASM.LangTypes as VerifiWASM (Function, Program)
 import WasmVerify.CFG (functionToCFG, stronglyConnCompCFG)
 import WasmVerify.CFG.Types (CFG, Node (Node), NodeLabel, getNodeFromLabel, nodeLabel)
 import WasmVerify.Monad
-import WasmVerify.Paths (allExecutionPaths, checkAssertsForSCC, getNodesAssertsMap)
+import WasmVerify.Paths (allExecutionPaths, checkAssertsForSCC, getNodesAssertsMap, getTransitionAnnotation)
 import WasmVerify.ToSMT (exprToSMT)
 
 executeProgram :: VerifiWASM.Program -> Wasm.ValidModule -> WasmVerify (Map Identifier [Lazy.Text])
@@ -71,7 +71,7 @@ executeFunction specModule (name, wasmFunction) = do
 
       -- Symbolic execution of all execution paths
       forM
-        (zip paths [0 ..])
+        (zip (traceShow paths paths) [0 ..])
         ( \(path, pathIndex) ->
             executePath specModule spec nodesAssertsMap cfgInitialsFinals pathIndex path
         )
@@ -80,8 +80,6 @@ executeFunction specModule (name, wasmFunction) = do
     -- module, we simply don't perform verification, so our SMT program is empty.
     Nothing -> return []
 
--- TODO: When executing paths, transitions between nodes that have annotations
--- must be added as an assert with whatever is in the annotation.
 executePath ::
   VerifiWASM.Program ->
   Function ->
@@ -111,7 +109,7 @@ executePath specModule spec nodesAssertsMap (cfg, initial, finals) pathIndex pat
   -- SYMBOLIC EXECUTION
   -- Add the SMT code corresponding to the symbolic execution of the nodes in the path
   let lastNodeInPath = last path
-  executeNodesInPath $
+  executeNodesInPath cfg $
     map
       (getNodeFromLabel cfg)
       -- If the last node in the path is a final node in the CFG,
@@ -192,12 +190,33 @@ executePath specModule spec nodesAssertsMap (cfg, initial, finals) pathIndex pat
     declareAllVarVersions (identifier, varVersion) = do
       addVarDeclsSMT [versionedVarToIdentifier (identifier, version) | version <- [0 .. varVersion]]
 
-executeNodesInPath :: [Node] -> WasmVerify ()
-executeNodesInPath nodes = do
+executeNodesInPath :: CFG -> [Node] -> WasmVerify ()
+executeNodesInPath cfg nodes = do
   appendToSMT "\n; code symbolic execution\n"
-  forM_ (zip nodes ([0 ..] :: [Int])) $ \(node, indexInPath) -> do
+  forM_ (zip nodes ([0 ..] :: [Int])) $ \(node, currentNodeIndex) -> do
+    -- Before executing the node, we update the state to hold in the 'nodeExecutionContext'
+    -- that the node that is about to be executed is the current node,
+    -- and the node that follows in the path is the next node.
+    modify (\state -> state{nodeExecutionContext = (nodeLabel node, nextNode nodes currentNodeIndex)})
+
     executeNode node
-  void $ gets smtText >>= (\x -> traceShow x (return x))
+
+    (currentNodeLabel, mNextNodeLabel) <- gets nodeExecutionContext
+    -- When there's a node to be executed next, we include in the SMT module
+    -- an assertion with the contents of the annotation in the transition (edge)
+    -- between the current node and the next node.
+    when (isJust $ trace (show (currentNodeLabel, mNextNodeLabel)) mNextNodeLabel) $ do
+      -- The use of 'fromJust' here is safe because we have
+      -- just checked whether the value is 'Nothing' or not
+      -- (and in that case, we throw a custom failure)
+      let mAnnotation = getTransitionAnnotation cfg currentNodeLabel (fromJust mNextNodeLabel)
+      maybe (return ()) addAnnotationToSMT mAnnotation
+
+  void $ gets smtText
+  where
+    nextNode :: [Node] -> Int -> Maybe NodeLabel
+    nextNode path index =
+      if index + 1 >= length path then Nothing else Just (nodeLabel $ path !! (index + 1))
 
 executeNode :: Node -> WasmVerify ()
 executeNode (Node (_, instructions)) =
@@ -351,8 +370,7 @@ newVarVersion identifier = do
   -- The use of 'Map.!' is safe here because we have populated
   -- the map with starting versions for all local variables in
   -- 'executeFunction'.
-  void $ gets identifierMap >>= (\x -> traceShow x (return x))
-  oldVer <- gets ((Map.! (traceShow identifier identifier)) . identifierMap)
+  oldVer <- gets ((Map.! identifier) . identifierMap)
   let newVer = oldVer + 1
   modify (insertNewVersion identifier newVer)
   return newVer
@@ -362,11 +380,10 @@ newVarVersion identifier = do
 
 lookupVarVersion :: Identifier -> WasmVerify IdVersion
 lookupVarVersion identifier = do
-  void $ gets identifierMap >>= (\x -> traceShow x (return x))
   -- The use of 'Map.!' is safe here because we have populated
   -- the map with starting versions for all local variables in
   -- 'executeFunction'.
-  gets ((Map.! (traceShow identifier identifier)) . identifierMap)
+  gets ((Map.! identifier) . identifierMap)
 
 {- | Pushes a value to the symbolic execution stack,
  returning the updated stack.

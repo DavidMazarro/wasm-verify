@@ -2,7 +2,7 @@ module WasmVerify.Monad where
 
 import Control.Exception (Exception)
 import Control.Monad.Except
-import Control.Monad.State (StateT, evalStateT, get, modify, put)
+import Control.Monad.State (StateT, evalStateT, gets, modify)
 import Control.Monad.Trans.Writer.CPS
 import Data.ByteString.Builder (Builder, toLazyByteString)
 import qualified Data.ByteString.Lazy as BS (putStr)
@@ -13,9 +13,9 @@ import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8Builder)
 import qualified Data.Text.Lazy as Lazy
 import Helpers.ANSI (colorInRed)
-import VerifiWASM.LangTypes (Expr (IInt, IVar), IdVersion, Identifier, Program, VersionedVar)
-import WasmVerify.CFG.Types (NodeLabel)
-import WasmVerify.ToSMT (ghostFunctionsToSMT)
+import VerifiWASM.LangTypes (Expr (..), IdVersion, Identifier, Program, VersionedVar)
+import WasmVerify.CFG.Types (Annotation (..), NodeLabel)
+import WasmVerify.ToSMT (exprToSMT, ghostFunctionsToSMT)
 
 -- TODO: add Haddock
 type WasmVerify a = ExceptT Failure (StateT ExecState (Writer Builder)) a
@@ -113,11 +113,27 @@ appendToSMT :: Text -> WasmVerify ()
 appendToSMT smtCode =
   modify (\state -> state{smtText = smtText state <> Lazy.fromStrict smtCode})
 
+{- | Prepends ghost function definitions (in the form of @define-fun@ and/or
+ their recursive variants) to the SMT accumulator in the 'WasmVerify' monad.
+-}
 addGhostFunctionsToSMT :: Program -> WasmVerify ()
 addGhostFunctionsToSMT = appendToSMT . ghostFunctionsToSMT
 
-{- | Adds a constant declaration corresponding to the versioned
- variable provided to the SMT accumulator in the 'WasmVerify' monad.
+{- | Appends an assertion corresponding to the comparison specified
+ by the provided 'Annotation' to the value at the top of the stack
+ (it is left in the stack unchanged) to the SMT accumulator in the 'WasmVerify' monad.
+-}
+addAnnotationToSMT :: Annotation -> WasmVerify ()
+addAnnotationToSMT annotation = do
+  topValue <- gets (head . symbolicStack)
+  case annotation of
+    Empty -> return ()
+    Eq n -> (addAssertSMT . exprToSMT) $ BEq (stackValueToExpr topValue) (IInt $ toInteger n)
+    NotEq n -> (addAssertSMT . exprToSMT) $ BDistinct (stackValueToExpr topValue) (IInt $ toInteger n)
+    GreaterEq n -> (addAssertSMT . exprToSMT) $ BGreaterOrEq (stackValueToExpr topValue) (IInt $ toInteger n)
+
+{- | Prepends constant declarations corresponding to the versioned
+ variables provided to the SMT accumulator in the 'WasmVerify' monad.
 -}
 addVarDeclsSMT :: [Identifier] -> WasmVerify ()
 addVarDeclsSMT vars =
