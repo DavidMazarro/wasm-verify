@@ -612,15 +612,19 @@ indexToVar index = "var_" <> show index
 allLocalsInFunction :: FunctionSpec -> [TypedIdentifier]
 allLocalsInFunction funcSpec = nubOrd $ concatMap localVars $ (locals . specBody) funcSpec
 
--- 'naturalToInt' was only available in the base library
+-- 'naturalToInt' and 'intToNatural' were only available in the base library
 -- from version 4.12.0 up to 4.14.3, for some reason
 -- unbeknownst to me. So this piece here defines the function
 -- when the system's GHC base version is outside that range.
 #if MIN_VERSION_base(4,15,0)
 naturalToInt :: Natural -> Int
 naturalToInt = fromInteger . naturalToInteger
+intToNatural :: Int -> Natural
+intToNatural = naturalToInteger . fromInteger
 #elif MIN_VERSION_base(4,12,0)
 #else 
 naturalToInt :: Natural -> Int
 naturalToInt = fromInteger . naturalToInteger
+intToNatural :: Int -> Natural
+intToNatural = naturalToInteger . fromInteger
 #endif
