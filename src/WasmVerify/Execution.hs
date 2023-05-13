@@ -273,6 +273,12 @@ executeInstruction :: VerifiWASM.Program -> Wasm.Instruction Natural -> WasmVeri
 -- For control instructions, the symbolic execution just skips over them
 -- since we have taken care of their control flow in the CFG step and the
 -- annotations corresponding to the control branching are added in 'executeNodesInPath'.
+executeInstruction _ Wasm.Unreachable =
+  failWithError $
+    Failure $
+      "WebAssembly program reached an unreachable instruction"
+        <> " during its execution, which results in a runtime error."
+executeInstruction _ Wasm.Nop = return ()
 executeInstruction _ (Wasm.Block _ _) = return ()
 executeInstruction _ (Wasm.Loop _ _) = return ()
 executeInstruction _ (Wasm.If _ _ _) = return ()
@@ -622,11 +628,11 @@ allLocalsInFunction funcSpec = nubOrd $ concatMap localVars $ (locals . specBody
 naturalToInt :: Natural -> Int
 naturalToInt = fromInteger . naturalToInteger
 intToNatural :: Int -> Natural
-intToNatural = naturalToInteger . fromInteger
+intToNatural = integerToNatural . toInteger
 #elif MIN_VERSION_base(4,12,0)
 #else 
 naturalToInt :: Natural -> Int
 naturalToInt = fromInteger . naturalToInteger
 intToNatural :: Int -> Natural
-intToNatural = naturalToInteger . fromInteger
+intToNatural = integerToNatural . toInteger
 #endif
