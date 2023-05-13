@@ -100,12 +100,13 @@ executeFunction specModule (name, wasmFunction) = do
     -- module, we simply don't perform verification, so our SMT program is empty.
     Nothing -> return []
 
--- | Performs the symbolic execution of a given execution path (see 'allExecutionPaths')
--- of a WebAssembly function, verifies it against its specification, and returns an
--- SMT module. This SMT module, when run through an SMT solver, tells us whether
--- the provided execution path adheres to the specification we gave for that function.
--- See 'WasmVerify.verifyModule' for more information on how we interpret the
--- result of running the SMT solver on an SMT module.
+{- | Performs the symbolic execution of a given execution path (see 'allExecutionPaths')
+ of a WebAssembly function, verifies it against its specification, and returns an
+ SMT module. This SMT module, when run through an SMT solver, tells us whether
+ the provided execution path adheres to the specification we gave for that function.
+ See 'WasmVerify.verifyModule' for more information on how we interpret the
+ result of running the SMT solver on an SMT module.
+-}
 executePath ::
   VerifiWASM.Program ->
   FunctionSpec ->
@@ -123,7 +124,9 @@ executePath specModule spec nodesAssertsMap (cfg, initial, finals) pathIndex pat
 
   appendToSMT $ "\n;;; path " <> T.pack (show pathIndex) <> "\n"
 
-  initializeIdentifierMap spec
+  -- If the path starts from the initial node, we need to initialize
+  -- the local variables to their default values.
+  when (head path == initial) $ initializeIdentifierMap spec
 
   let numOfArgs = length $ funcArgs spec
   initializeLocalsSMT [numOfArgs .. numOfArgs + length (allLocalsInFunction spec) - 1]
