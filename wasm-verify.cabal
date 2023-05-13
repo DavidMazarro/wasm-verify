@@ -54,6 +54,7 @@ library
     , parser-combinators
     , path
     , pretty-simple
+    , process
     , safe
     , safe-exceptions
     , text
