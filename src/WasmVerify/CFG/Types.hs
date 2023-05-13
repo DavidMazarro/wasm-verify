@@ -1,6 +1,6 @@
 module WasmVerify.CFG.Types where
 
-import Data.Foldable (find, maximumBy)
+import Data.Foldable (maximumBy)
 import Data.List (sortBy)
 import Data.Map (Map)
 import qualified Data.Map as Map

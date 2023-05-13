@@ -2,13 +2,15 @@
 
 module WasmVerify.Execution where
 
-import Control.Monad (foldM, forM, forM_, void, when)
+import Control.Monad (foldM, forM, forM_, replicateM, replicateM_, void, when)
 import Control.Monad.State (get, gets, modify, put)
+import Data.Bimap (Bimap)
+import qualified Data.Bimap as Bimap
 import Data.Containers.ListUtils (nubOrd)
 import Data.List (find, isPrefixOf, sort, stripPrefix)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Maybe (fromJust, fromMaybe, isJust)
+import Data.Maybe (fromJust, fromMaybe, isJust, mapMaybe)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -27,29 +29,21 @@ import WasmVerify.Paths (allExecutionPaths, checkAssertsForSCC, getNodesAssertsM
 import WasmVerify.ToSMT (exprToSMT)
 
 executeProgram :: VerifiWASM.Program -> Wasm.ValidModule -> WasmVerify (Map Identifier [Lazy.Text])
-executeProgram program wasmModule =
+executeProgram program wasmModule = do
+  modify (\state -> state{wasmFunctionIndicesBimap = wasmFunctionsBimap})
   foldM
     ( \smtMap func -> do
         -- '(!!)' from lists is safe here by construction of the map of WASM functions,
         -- and 'Map.!' is safe here because we have already validated that there exists
         -- a WASM function for each of the specs in the VerifiWASM program (see 'ASTValidator.validate')
-        let wasmFunction = (Wasm.functions . Wasm.getModule $ wasmModule) !! (wasmFunctions Map.! funcName func)
+        let wasmFunction = (Wasm.functions . Wasm.getModule $ wasmModule) !! (wasmFunctionsBimap Bimap.! funcName func)
         smtFunction <- executeFunction program (funcName func, wasmFunction)
         return $ Map.insert (funcName func) smtFunction smtMap
     )
     Map.empty
     $ functions program
   where
-    wasmFunctions = getFunctionIndicesFromExports $ Wasm.getModule wasmModule
-    getFunctionIndicesFromExports :: Wasm.Module -> Map Identifier Int
-    getFunctionIndicesFromExports wasmModule' =
-      foldr
-        ( \export accMap -> case Wasm.desc export of
-            (Wasm.ExportFunc index) -> Map.insert (Lazy.unpack $ Wasm.name export) (naturalToInt index) accMap
-            _ -> accMap
-        )
-        Map.empty
-        $ Wasm.exports wasmModule'
+    wasmFunctionsBimap = getFunctionIndicesBimap $ Wasm.getModule wasmModule
 
 -- TODO: Initialise locals to the default values corresponding
 -- to their types in the variable version map, and add SMT for
@@ -109,7 +103,7 @@ executePath specModule spec nodesAssertsMap (cfg, initial, finals) pathIndex pat
   -- SYMBOLIC EXECUTION
   -- Add the SMT code corresponding to the symbolic execution of the nodes in the path
   let lastNodeInPath = last path
-  executeNodesInPath cfg $
+  executeNodesInPath specModule cfg $
     map
       (getNodeFromLabel cfg)
       -- If the last node in the path is a final node in the CFG,
@@ -134,20 +128,9 @@ executePath specModule spec nodesAssertsMap (cfg, initial, finals) pathIndex pat
   forM_ (reverse $ Map.assocs varMap) declareAllVarVersions
 
   addSetLogicSMT "QF_UFLIA"
-  addCheckSatSMT
+  appendToSMT "(check-sat)"
   gets smtText
   where
-    initializeIdentifierMap :: VerifiWASM.Function -> WasmVerify ()
-    initializeIdentifierMap func = do
-      state <- get
-      let numArgs = length $ funcArgs func
-      let numLocals = length $ allLocalsInFunction func
-      let initialMap =
-            Map.fromList $
-              [ (indexToVar (intToNatural var), 0)
-                | var <- [0 .. numArgs + numLocals - 1]
-              ]
-      put state{identifierMap = initialMap}
     -- Used later to substitute named arguments in the 'Requires' clauses with
     -- the actual variables that are generated during the symbolic execution.
     getVarToExprMap :: Function -> WasmVerify (Map Identifier Expr)
@@ -160,6 +143,7 @@ executePath specModule spec nodesAssertsMap (cfg, initial, finals) pathIndex pat
                 let identifier = versionedVarToIdentifier (var, varVersion)
                 return $ (fst arg, IVar identifier)
             )
+
     -- Used later to substitute named arguments and the named return variables in the 'Ensures'
     -- clauses with the actual variables that are generated during the symbolic execution.
     getVarToExprMapWithReturns :: Function -> WasmVerify (Map Identifier Expr)
@@ -172,6 +156,17 @@ executePath specModule spec nodesAssertsMap (cfg, initial, finals) pathIndex pat
         )
         varToExprMap
         $ funcReturns func
+    initializeIdentifierMap :: VerifiWASM.Function -> WasmVerify ()
+    initializeIdentifierMap func = do
+      state <- get
+      let numArgs = length $ funcArgs func
+      let numLocals = length $ allLocalsInFunction func
+      let initialMap =
+            Map.fromList $
+              [ (indexToVar (intToNatural var), 0)
+                | var <- [0 .. numArgs + numLocals - 1]
+              ]
+      put state{identifierMap = initialMap}
     isFinalNode :: NodeLabel -> Bool
     isFinalNode label = label `Set.member` finals
     assertionPre :: Map Identifier Expr -> NodeLabel -> WasmVerify Expr
@@ -190,8 +185,8 @@ executePath specModule spec nodesAssertsMap (cfg, initial, finals) pathIndex pat
     declareAllVarVersions (identifier, varVersion) = do
       addVarDeclsSMT [versionedVarToIdentifier (identifier, version) | version <- [0 .. varVersion]]
 
-executeNodesInPath :: CFG -> [Node] -> WasmVerify ()
-executeNodesInPath cfg nodes = do
+executeNodesInPath :: VerifiWASM.Program -> CFG -> [Node] -> WasmVerify ()
+executeNodesInPath specModule cfg nodes = do
   appendToSMT "\n; code symbolic execution\n"
   forM_ (zip nodes ([0 ..] :: [Int])) $ \(node, currentNodeIndex) -> do
     -- Before executing the node, we update the state to hold in the 'nodeExecutionContext'
@@ -199,7 +194,7 @@ executeNodesInPath cfg nodes = do
     -- and the node that follows in the path is the next node.
     modify (\state -> state{nodeExecutionContext = (nodeLabel node, nextNode nodes currentNodeIndex)})
 
-    executeNode node
+    executeNode specModule node
 
     (currentNodeLabel, mNextNodeLabel) <- gets nodeExecutionContext
     -- When there's a node to be executed next, we include in the SMT module
@@ -218,27 +213,27 @@ executeNodesInPath cfg nodes = do
     nextNode path index =
       if index + 1 >= length path then Nothing else Just (nodeLabel $ path !! (index + 1))
 
-executeNode :: Node -> WasmVerify ()
-executeNode (Node (_, instructions)) =
-  forM_ instructions (executeInstruction . snd)
+executeNode :: VerifiWASM.Program -> Node -> WasmVerify ()
+executeNode specModule (Node (_, instructions)) =
+  forM_ instructions (executeInstruction specModule . snd)
 
 -- TODO: Add special treatment for function calls. See Manuel's notes.
 -- When you check the spec of a function, you assume the precondition and
 -- check the postcondition. When you call a function it's the opposite:
 -- you check the precondition and assume the poscondition holds (because
 -- you already verified the function).
-executeInstruction :: Wasm.Instruction Natural -> WasmVerify ()
-executeInstruction (Wasm.Block _ _) = return ()
-executeInstruction (Wasm.Loop _ _) = return ()
-executeInstruction (Wasm.Br _) = return ()
-executeInstruction (Wasm.BrIf _) = return ()
-executeInstruction Wasm.Return = return ()
-executeInstruction (Wasm.GetLocal index) = do
+executeInstruction :: VerifiWASM.Program -> Wasm.Instruction Natural -> WasmVerify ()
+executeInstruction _ (Wasm.Block _ _) = return ()
+executeInstruction _ (Wasm.Loop _ _) = return ()
+executeInstruction _ (Wasm.Br _) = return ()
+executeInstruction _ (Wasm.BrIf _) = return ()
+executeInstruction _ Wasm.Return = return ()
+executeInstruction _ (Wasm.GetLocal index) = do
   let identifier = indexToVar index
   varVersion <- lookupVarVersion identifier
   let stackValue = ValueVar $ versionedVarToIdentifier (identifier, varVersion)
   void $ pushToStack stackValue
-executeInstruction (Wasm.SetLocal index) = do
+executeInstruction _ (Wasm.SetLocal index) = do
   topValue <- popFromStack
   let identifier = indexToVar index
   varVersion <- newVarVersion identifier
@@ -246,25 +241,62 @@ executeInstruction (Wasm.SetLocal index) = do
 -- TODO: Add support for tee
 -- executeInstruction (Wasm.TeeLocal index) = do
 --   undefined
-executeInstruction (Wasm.I32Const n) = do
+executeInstruction _ (Wasm.I32Const n) = do
   let stackValue = ValueConst $ toInteger n
   void . pushToStack $ stackValue
-executeInstruction (Wasm.I64Const n) = do
+executeInstruction _ (Wasm.I64Const n) = do
   let stackValue = ValueConst $ toInteger n
   void . pushToStack $ stackValue
-executeInstruction (Wasm.IRelOp _ relOp) = do
+executeInstruction _ (Wasm.IRelOp _ relOp) = do
   operationResult <- executeIRelOp relOp
   (resultVar, version) <- newResultVar
   addAssertSMT =<< varEqualsExpr (resultVar, version) operationResult
   void . pushToStack $ ValueVar $ versionedVarToIdentifier (resultVar, version)
-executeInstruction (Wasm.IBinOp _ binOp) = do
+executeInstruction _ (Wasm.IBinOp _ binOp) = do
   operationResult <- executeIBinOp binOp
   (resultVar, version) <- newResultVar
   addAssertSMT =<< varEqualsExpr (resultVar, version) operationResult
   void . pushToStack $ ValueVar $ versionedVarToIdentifier (resultVar, version)
--- executeInstruction (Wasm.Call index) = do
---   undefined
-executeInstruction instruction =
+executeInstruction specModule (Wasm.Call index) = do
+  functionIndicesBimap <- gets wasmFunctionIndicesBimap
+  let name = functionIndicesBimap Bimap.!> naturalToInt index
+  let mSpec = find ((== name) . funcName) $ functions specModule
+  case mSpec of
+    (Just spec) -> do
+      appendToSMT $ "\n; verification of " <> T.pack name <> " function call\n(push 1)"
+
+      let args = map fst $ funcArgs spec
+      -- Due to validation in WebAssembly, it is safe to pop this many values from the stack
+      -- since it is guaranteed as many as the arguments will be at the top of the stack.
+      poppedValues <- replicateM (length args) popFromStack
+      let argsVarMap = Map.fromList $ zip args (map stackValueToExpr poppedValues)
+      precondition <- (replaceWithVersionedVars argsVarMap . requiresExpr . requires . funcSpec) spec
+      -- We must ensure the precondition holds. To do that we negate it and check for UNSAT.
+      appendToSMT $ "  \n  ; check that the precondition of " <> T.pack name <> " holds\n  "
+      addAssertSMT $ exprToSMT (BNot precondition)
+      appendToSMT "  (check-sat)\n(pop 1)"
+
+      -- Adds to SMT as many result variables as return values the called function yields
+      let returns = map fst $ funcReturns spec
+      replicateM_ (length returns) $ do
+        (resultVar, version) <- newResultVar
+        void . pushToStack $ ValueVar $ versionedVarToIdentifier (resultVar, version)
+
+      -- It is safe to peek this many values from the stack since we have just
+      -- pushed to the top of the stack as many as return variables in the previous step.
+      peekedValues <- gets (take (length returns) . symbolicStack)
+      let returnsVarMap = Map.fromList $ zip returns (map stackValueToExpr peekedValues)
+      -- The map union here is safe (no overlapping variable names) since due to validation
+      -- in VerifiWASM, we don't allow any arguments and return variables in a scope to share the same name.
+      let argsReturnsVarMap = argsVarMap `Map.union` returnsVarMap
+      -- Since the precondition of the called function holds, we can assume the postcondition,
+      -- which we will add as an assert to our main SMT frame.
+      postcondition <- (replaceWithVersionedVars argsReturnsVarMap . ensuresExpr . ensures . funcSpec) spec
+      appendToSMT $ "  \n; assume the postcondition of " <> T.pack name <> "\n"
+      addAssertSMT $ exprToSMT postcondition
+      appendToSMT "\n"
+    Nothing -> return () -- TODO. Throw an error when there's no spec for the called function?
+executeInstruction _ instruction =
   failWithError $
     Failure $
       "Unsupported WebAssembly instruction: "
@@ -338,6 +370,17 @@ executeIRelOp binOp = do
           "Unsupported WebAssembly integer comparison operation: "
             <> (T.pack . show)
               binOp
+
+{- | Returns a 'Bimap' with the names of the functions in the WebAssembly
+ module and their corresponding indices in the list of 'Wasm.functions'.
+-}
+getFunctionIndicesBimap :: Wasm.Module -> Bimap Identifier Int
+getFunctionIndicesBimap wasmModule =
+  Bimap.fromList (mapMaybe funcWithIndex $ Wasm.exports wasmModule)
+  where
+    funcWithIndex export = case Wasm.desc export of
+      (Wasm.ExportFunc index) -> Just (Lazy.unpack (Wasm.name export), naturalToInt index)
+      _ -> Nothing
 
 {- | Returns a fresh result variable to be used in assertions that store
  the result of WebAssembly computations in 'executeInstruction'. It also inserts that

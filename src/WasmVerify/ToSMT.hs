@@ -6,8 +6,6 @@
 module WasmVerify.ToSMT where
 
 import Data.Graph (SCC (..), stronglyConnComp)
-import Data.Map (Map)
-import qualified Data.Map as Map
 import Data.Text (Text, intercalate)
 import qualified Data.Text as T
 import Safe (findJust)

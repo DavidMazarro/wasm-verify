@@ -46,6 +46,7 @@ library
 
   build-depends:
     , base
+    , bimap
     , bytestring
     , containers
     , megaparsec

@@ -4,6 +4,8 @@ import Control.Exception (Exception)
 import Control.Monad.Except
 import Control.Monad.State (StateT, evalStateT, gets, modify)
 import Control.Monad.Trans.Writer.CPS
+import Data.Bimap (Bimap)
+import qualified Data.Bimap as Bimap
 import Data.ByteString.Builder (Builder, toLazyByteString)
 import qualified Data.ByteString.Lazy as BS (putStr)
 import Data.Map (Map)
@@ -37,6 +39,11 @@ data ExecState = ExecState
     -- being executed and which is the node that will be executed next (if there's one),
     -- in the execution path that is currently being executed.
     nodeExecutionContext :: (NodeLabel, Maybe NodeLabel),
+    -- | A 'Bimap' with the names of the functions in the WebAssembly
+    -- module and their corresponding indices in the list of 'Wasm.functions'.
+    -- Used during symbolic execution to lookup the index of WebAssembly functions
+    -- given their name from the 'VerifiWASM' spec and viceversa.
+    wasmFunctionIndicesBimap :: Bimap Identifier Int,
     -- | A text accumulator that keeps adding SMT. After performing
     -- all of the symbolic execution, this value is our SMTLIB2 program
     -- that will be run and output the result of the verification.
@@ -60,7 +67,7 @@ runWasmVerify action = do
     Right x -> pure x
     Left err -> error $ show $ unFailure err
   where
-    emptyContextState = ExecState M.empty [] (0, Nothing) ""
+    emptyContextState = ExecState M.empty [] (0, Nothing) Bimap.empty ""
 
 -- | Provides an easy action for logging within 'WasmVerify' contexts.
 logError :: Failure -> WasmVerify ()
@@ -156,9 +163,3 @@ addAssertSMT assertText =
 addSetLogicSMT :: Text -> WasmVerify ()
 addSetLogicSMT logic =
   prependToSMT $ "(set-logic " <> logic <> ")\n\n"
-
-{- | Adds the final command to the SMT model,
- asking to check for satisfiability of the model.
--}
-addCheckSatSMT :: WasmVerify ()
-addCheckSatSMT = appendToSMT "\n(check-sat)\n"
