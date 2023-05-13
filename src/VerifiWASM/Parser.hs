@@ -28,7 +28,7 @@ programParser = do
   funDefinitions <- many funDefinitionParser
   programFromFunctions funDefinitions <$ eof
   where
-    programFromFunctions :: [Either Function GhostFunction] -> Program
+    programFromFunctions :: [Either FunctionSpec GhostFunction] -> Program
     programFromFunctions list =
       let (funcs, ghostFuncs) = partitionEithers list
        in Program
@@ -36,12 +36,12 @@ programParser = do
               ghostFunctions = ghostFuncs
             }
 
-funDefinitionParser :: Parser (Either Function GhostFunction)
+funDefinitionParser :: Parser (Either FunctionSpec GhostFunction)
 funDefinitionParser =
   Left <$> functionParser
     <|> Right <$> ghostFunctionParser
 
-functionParser :: Parser Function
+functionParser :: Parser FunctionSpec
 functionParser = do
   keyword "spec"
   name <- identifierParser' True
@@ -53,14 +53,14 @@ functionParser = do
   spec <- specParser name
   lexeme "}"
   return $
-    Function
+    FunctionSpec
       { funcName = name,
         funcArgs = args,
         funcReturns = returns,
-        funcSpec = spec
+        specBody = spec
       }
 
-specParser :: Identifier -> Parser Spec
+specParser :: Identifier -> Parser SpecBody
 specParser name = do
   declarations <- many declarationParser
   let requiresList = [requires | DeclRequires requires <- declarations]
@@ -81,7 +81,7 @@ specParser name = do
   let asserts = [assert | DeclAssert assert <- declarations]
 
   return
-    Spec
+    SpecBody
       { locals = locals,
         requires = requires,
         ensures = ensures,

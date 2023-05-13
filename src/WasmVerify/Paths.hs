@@ -25,7 +25,7 @@ import VerifiWASM.LangTypes as VerifiWASM
 import WasmVerify.CFG.Types
 import WasmVerify.Monad (Failure (Failure), WasmVerify, failWithError)
 
-{- | Given a 'CFG' and a function specification ('VerifiWASM.Function'),
+{- | Given a 'CFG' and a function specification ('VerifiWASM.FunctionSpec'),
  this function returns a map that associates each node in the 'CFG' with
  an 'Assert'. This function makes a couple of checks and assumptions:
 
@@ -48,9 +48,9 @@ import WasmVerify.Monad (Failure (Failure), WasmVerify, failWithError)
   If any of these criteria are not met by the specification, this function
   will throw a 'Failure'.
 -}
-getNodesAssertsMap :: CFG -> VerifiWASM.Function -> WasmVerify (Map Node Assert)
+getNodesAssertsMap :: CFG -> VerifiWASM.FunctionSpec -> WasmVerify (Map Node Assert)
 getNodesAssertsMap specCFG spec = do
-  nodeLabelsAndAsserts <- mapM (nodeLabelAndAssert specCFG) $ (asserts . funcSpec) spec
+  nodeLabelsAndAsserts <- mapM (nodeLabelAndAssert specCFG) $ (asserts . specBody) spec
 
   -- We check that all of the asserts have their index pointing
   -- to the first instruction in the list of instructions in the node,
@@ -137,7 +137,7 @@ getTransitionAnnotation cfg from to =
  that there's an assert in the specification for the provided strongly connected
  component of the 'CFG' in the case that it is a 'CyclicSCC' (representing a loop).
 -} -- TODO: Use this function after calling getNodesAssertsMap in the main to check for asserts in SCCs
-checkAssertsForSCC :: VerifiWASM.Function -> Map Node Assert -> SCC Node -> WasmVerify ()
+checkAssertsForSCC :: VerifiWASM.FunctionSpec -> Map Node Assert -> SCC Node -> WasmVerify ()
 checkAssertsForSCC spec nodesAssertsMap scc =
   case scc of
     AcyclicSCC _ -> return ()

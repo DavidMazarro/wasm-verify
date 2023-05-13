@@ -141,7 +141,7 @@ validateFunctionsExist program wasmFunctionNames = do
  and the same types than those of the WebAssembly function
  of the same name.
 -}
-validateSpecArgReturnTypes :: Wasm.ValidModule -> [(Lazy.Text, Wasm.Function)] -> Function -> VerifiWASM ()
+validateSpecArgReturnTypes :: Wasm.ValidModule -> [(Lazy.Text, Wasm.Function)] -> FunctionSpec -> VerifiWASM ()
 validateSpecArgReturnTypes wasmModule wasmFunctions spec = do
   let mWasmFunction = find (\name -> (Lazy.unpack . fst) name == funcName spec) wasmFunctions
 
@@ -168,11 +168,11 @@ validateSpecArgReturnTypes wasmModule wasmFunctions spec = do
     wasmFuncTypes = (Wasm.types . Wasm.getModule) wasmModule
     specArgTypes = map snd $ funcArgs spec
     specReturnTypes = map snd $ funcReturns spec
-    specLocalTypes = map snd $ (concatMap localVars . locals . funcSpec) spec
+    specLocalTypes = map snd $ (concatMap localVars . locals . specBody) spec
     notFoundWasmFunErr name =
       failWithError $
         Failure $
-          "Function "
+          "FunctionSpec "
             <> (bold . pack)
               name
             <> " could not be found in the WebAssembly module "
@@ -198,7 +198,7 @@ validateSpecArgReturnTypes wasmModule wasmFunctions spec = do
             <> (bold . pack . show)
               wasmTypes
 
-validateFunction :: [Identifier] -> Function -> VerifiWASM ()
+validateFunction :: [Identifier] -> FunctionSpec -> VerifiWASM ()
 validateFunction functionAndGhostNames function = do
   -- Sets the local context
   let name = funcName function
@@ -210,10 +210,10 @@ validateFunction functionAndGhostNames function = do
   unless (null identifierCollissions) $
     argsIdentifiersCollissionsErr "function specification" "arguments" name identifierCollissions
 
-  validateLocalIdentifiers functionAndGhostNames (locals . funcSpec $ function)
-  validateRequires (requires . funcSpec $ function)
-  validateEnsures (ensures . funcSpec $ function)
-  mapM_ validateAssert $ asserts . funcSpec $ function
+  validateLocalIdentifiers functionAndGhostNames (locals . specBody $ function)
+  validateRequires (requires . specBody $ function)
+  validateEnsures (ensures . specBody $ function)
+  mapM_ validateAssert $ asserts . specBody $ function
   where
     funcArgsIdentifiers = map fst . funcArgs $ function
 
@@ -606,11 +606,11 @@ programTypes program@Program{functions, ghostFunctions} = do
  a function. Those would be: its arguments, its return values,
  and the local variables defined in the specification.
 -}
-functionTypes :: Function -> VerifiWASM VarTypes
+functionTypes :: FunctionSpec -> VerifiWASM VarTypes
 functionTypes function = do
   let argNames = map fst (funcArgs function)
   let returnNames = map fst (funcReturns function)
-  let localDecls = concatMap localVars $ locals $ funcSpec function
+  let localDecls = concatMap localVars $ locals $ specBody function
   let localNames = map fst localDecls
   let allNames = argNames ++ returnNames ++ localNames
 
@@ -712,7 +712,7 @@ lookupTypesInFunction function = do
     notFoundFunErr name =
       failWithError $
         Failure $
-          "Function specification "
+          "FunctionSpec specification "
             <> (bold . pack)
               name
             <> " could not be found in the VerifiWASM file "

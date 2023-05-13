@@ -11,7 +11,7 @@ import Data.Map
  /can/ be empty, i.e. have no functions of either kind.
 -}
 data Program = Program
-  { functions :: [Function],
+  { functions :: [FunctionSpec],
     ghostFunctions :: [GhostFunction]
   }
   deriving (Show)
@@ -20,11 +20,11 @@ data Program = Program
  WASM functions via verification conditions
  that need to hold during the verification process.
 -}
-data Function = Function
+data FunctionSpec = FunctionSpec
   { funcName :: Identifier,
     funcArgs :: [TypedIdentifier],
     funcReturns :: [TypedIdentifier],
-    funcSpec :: Spec
+    specBody :: SpecBody
   }
   deriving (Show)
 
@@ -43,7 +43,7 @@ newtype Termination = Decreases [Identifier]
 
 type TypedIdentifier = (Identifier, IdType)
 
-data Spec = Spec
+data SpecBody = SpecBody
   { locals :: [Local],
     -- Order between sets of requires, ensures, and asserts doesn't matter
     -- But within a given family, order DOES matter
