@@ -332,9 +332,11 @@ executeInstruction _ (Wasm.SetLocal index) = do
   let identifier = indexToVar index
   varVersion <- newVarVersion identifier
   addAssertSMT =<< varEqualsExpr (identifier, varVersion) (stackValueToExpr topValue)
--- TODO: Add support for tee
--- executeInstruction (Wasm.TeeLocal index) = do
---   undefined
+executeInstruction specModule (Wasm.TeeLocal index) = do
+  topValue <- popFromStack
+  void . pushToStack $ topValue
+  void . pushToStack $ topValue
+  executeInstruction specModule (Wasm.SetLocal index)
 executeInstruction _ (Wasm.I32Const n) = do
   let stackValue = ValueConst $ toInteger n
   void . pushToStack $ stackValue
