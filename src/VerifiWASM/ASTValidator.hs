@@ -43,7 +43,7 @@
       ghost function must be arguments of that ghost function.
       - TODO: review which other validations I'm doing
 
- In addition, in the 'Assert's \/ 'Requires' \/ 'Ensures' of functions,
+ In addition, in the 'Requires' \/ 'Ensures' \/ 'Assert's of functions,
  or in the body of 'GhostFunction's, there are expressions ('Expr').
  These are the validations that are performed on expressions:
 

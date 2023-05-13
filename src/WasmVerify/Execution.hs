@@ -1,8 +1,17 @@
 {-# LANGUAGE CPP #-}
 
+-----------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------
+
+{- |
+ = Symbolic execution and SMT code generation
+
+ TODO: Add description
+-}
 module WasmVerify.Execution where
 
-import Control.Monad (foldM, forM, forM_, replicateM, replicateM_, void, when)
+import Control.Monad (foldM, forM, forM_, replicateM, replicateM_, unless, void, when)
 import Control.Monad.State (get, gets, modify, put)
 import Data.Bimap (Bimap)
 import qualified Data.Bimap as Bimap
@@ -27,33 +36,46 @@ import WasmVerify.Monad
 import WasmVerify.Paths (allExecutionPaths, checkAssertsForSCC, getNodesAssertsMap, getTransitionAnnotation)
 import WasmVerify.ToSMT (exprToSMT)
 
--- | Performs the symbolic execution of all functions in a WebAssembly module
--- that have a specification in the VerifiWASM 'VerifiWASM.Program' provided.
--- It returns a map between the names of the functions to be verified, and a list
--- of SMT modules that correspond to the possible execution paths (see 'allExecutionPaths')
--- of a WebAssembly program. 
-executeProgram :: VerifiWASM.Program -> Wasm.ValidModule -> WasmVerify (Map Identifier [Lazy.Text])
+{- | Performs the symbolic execution of all functions in a WebAssembly module that
+ have a matching specification ('FunctionSpec') in the VerifiWASM 'VerifiWASM.Program' provided,
+ by calling 'executeFunction' on each one.
+ It returns a map between the names of the functions to be verified, and a list
+ of SMT modules that correspond to the possible execution paths (see 'allExecutionPaths')
+ of a WebAssembly function.
+-}
+executeProgram ::
+  -- | The VerifiWASM specification to verify against.
+  VerifiWASM.Program ->
+  -- | The WebAssembly module containing the functions to be verified.
+  Wasm.ValidModule ->
+  WasmVerify (Map Identifier [Lazy.Text])
 executeProgram program wasmModule = do
   modify (\state -> state{wasmFunctionIndicesBimap = wasmFunctionsBimap})
   foldM
-    ( \smtMap funcspec -> do
+    ( \smtMap funcSpec -> do
         -- '(!!)' from lists is safe here by construction of the map of WASM functions,
         -- and 'Map.!' is safe here because we have already validated that there exists
         -- a WASM function for each of the specs in the VerifiWASM program (see 'ASTValidator.validate')
-        let wasmFunction = (Wasm.functions . Wasm.getModule $ wasmModule) !! (wasmFunctionsBimap Bimap.! funcName funcspec)
-        smtFunction <- executeFunction program (funcName funcspec, wasmFunction)
-        return $ Map.insert (funcName funcspec) smtFunction smtMap
+        let wasmFunction = (Wasm.functions . Wasm.getModule $ wasmModule) !! (wasmFunctionsBimap Bimap.! funcName funcSpec)
+        smtFunction <- executeFunction program (funcName funcSpec, wasmFunction)
+        return $ Map.insert (funcName funcSpec) smtFunction smtMap
     )
     Map.empty
     $ functions program
   where
     wasmFunctionsBimap = getFunctionIndicesBimap $ Wasm.getModule wasmModule
 
--- TODO: Initialise locals to the default values corresponding
--- to their types in the variable version map, and add SMT for
--- those default values. Do the same thing for arguments, but
--- adding SMT matching the precondition in the specification.
-executeFunction :: VerifiWASM.Program -> (Identifier, Wasm.Function) -> WasmVerify [Lazy.Text]
+{- | Performs the symbolic execution of a WebAssembly function, verifies it against
+ its specification, and returns a list of SMT modules that correspond to the possible
+ execution paths (see 'allExecutionPaths') of a WebAssembly function.
+-}
+executeFunction ::
+  -- | The VerifiWASM specification to verify against.
+  VerifiWASM.Program ->
+  -- | A tuple of the name of the function to be verified
+  -- and the function's contents.
+  (Identifier, Wasm.Function) ->
+  WasmVerify [Lazy.Text]
 executeFunction specModule (name, wasmFunction) = do
   cleanSMT
   let mSpec = find ((== name) . funcName) $ functions specModule
@@ -78,6 +100,12 @@ executeFunction specModule (name, wasmFunction) = do
     -- module, we simply don't perform verification, so our SMT program is empty.
     Nothing -> return []
 
+-- | Performs the symbolic execution of a given execution path (see 'allExecutionPaths')
+-- of a WebAssembly function, verifies it against its specification, and returns an
+-- SMT module. This SMT module, when run through an SMT solver, tells us whether
+-- the provided execution path adheres to the specification we gave for that function.
+-- See 'WasmVerify.verifyModule' for more information on how we interpret the
+-- result of running the SMT solver on an SMT module.
 executePath ::
   VerifiWASM.Program ->
   FunctionSpec ->
@@ -96,6 +124,9 @@ executePath specModule spec nodesAssertsMap (cfg, initial, finals) pathIndex pat
   appendToSMT $ "\n;;; path " <> T.pack (show pathIndex) <> "\n"
 
   initializeIdentifierMap spec
+
+  let numOfArgs = length $ funcArgs spec
+  initializeLocalsSMT [numOfArgs .. numOfArgs + length (allLocalsInFunction spec) - 1]
 
   -- PRECONDITION
   -- Add precondition (requires or assert depending on the first node in the path) to SMT
@@ -131,15 +162,21 @@ executePath specModule spec nodesAssertsMap (cfg, initial, finals) pathIndex pat
   varMap <- gets identifierMap
   forM_ (reverse $ Map.assocs varMap) declareAllVarVersions
 
-  addSetLogicSMT "QF_UFLIA"
   appendToSMT "(check-sat)"
   gets smtText
   where
+    initializeLocalsSMT :: [Int] -> WasmVerify ()
+    initializeLocalsSMT localIndices = do
+      unless (null localIndices) $ do
+        appendToSMT $ "\n; initialize local variables" <> "\n"
+        -- We are assuming all local variables are integers.
+        forM_ localIndices $ \index -> addAssertSMT =<< varEqualsExpr ("var_" <> show index, 0) (IInt 0)
+
     -- Used later to substitute named arguments in the 'Requires' clauses with
     -- the actual variables that are generated during the symbolic execution.
     getVarToExprMap :: FunctionSpec -> WasmVerify (Map Identifier Expr)
-    getVarToExprMap funcspec = do
-      let argsWithIndex = zip (funcArgs funcspec ++ allLocalsInFunction funcspec) ([0 ..] :: [Int])
+    getVarToExprMap funcSpec = do
+      let argsWithIndex = zip (funcArgs funcSpec ++ allLocalsInFunction funcSpec) ([0 ..] :: [Int])
       Map.fromList
         <$> ( forM argsWithIndex $ \(arg, index) -> do
                 let var = "var_" <> show index
@@ -151,20 +188,20 @@ executePath specModule spec nodesAssertsMap (cfg, initial, finals) pathIndex pat
     -- Used later to substitute named arguments and the named return variables in the 'Ensures'
     -- clauses with the actual variables that are generated during the symbolic execution.
     getVarToExprMapWithReturns :: FunctionSpec -> WasmVerify (Map Identifier Expr)
-    getVarToExprMapWithReturns funcspec = do
-      varToExprMap <- getVarToExprMap funcspec
+    getVarToExprMapWithReturns funcSpec = do
+      varToExprMap <- getVarToExprMap funcSpec
       foldM
         ( \varMap ret -> do
             topValue <- popFromStack
             return $ Map.insert (fst ret) (stackValueToExpr topValue) varMap
         )
         varToExprMap
-        $ funcReturns funcspec
+        $ funcReturns funcSpec
     initializeIdentifierMap :: VerifiWASM.FunctionSpec -> WasmVerify ()
-    initializeIdentifierMap funcspec = do
+    initializeIdentifierMap funcSpec = do
       state <- get
-      let numArgs = length $ funcArgs funcspec
-      let numLocals = length $ allLocalsInFunction funcspec
+      let numArgs = length $ funcArgs funcSpec
+      let numLocals = length $ allLocalsInFunction funcSpec
       let initialMap =
             Map.fromList $
               [ (indexToVar (intToNatural var), 0)
@@ -570,7 +607,7 @@ indexToVar index = "var_" <> show index
  different 'Local' declarations found in the 'SpecBody'.
 -}
 allLocalsInFunction :: FunctionSpec -> [TypedIdentifier]
-allLocalsInFunction funcspec = nubOrd $ concatMap localVars $ (locals . specBody) funcspec
+allLocalsInFunction funcSpec = nubOrd $ concatMap localVars $ (locals . specBody) funcSpec
 
 -- 'naturalToInt' was only available in the base library
 -- from version 4.12.0 up to 4.14.3, for some reason

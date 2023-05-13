@@ -6,9 +6,8 @@ module VerifiWASM.LangTypes where
 
 import Data.Map
 
-{- | Programs are comprised of a list of functions
- as well as a list of ghost functions. Programs
- /can/ be empty, i.e. have no functions of either kind.
+{- | Programs are comprised of a list of function specifications as well as
+ a list of ghost functions. Programs /can/ be empty, i.e. have no functions of either kind.
 -}
 data Program = Program
   { functions :: [FunctionSpec],
@@ -16,9 +15,8 @@ data Program = Program
   }
   deriving (Show)
 
-{- | These reflect the behavior of the target
- WASM functions via verification conditions
- that need to hold during the verification process.
+{- | These reflect the behavior of a specific WebAssembly function (of the same name)
+ by means of verification conditions that need to hold during the verification process.
 -}
 data FunctionSpec = FunctionSpec
   { funcName :: Identifier,
@@ -28,6 +26,21 @@ data FunctionSpec = FunctionSpec
   }
   deriving (Show)
 
+{- | Ghost functions can be used in the verification process.
+ They receive some arguments and return a value, by substituting the
+ arguments in the expression body (constructed as an 'Expr') and evaluating
+ that expression. In that sense, they are very similar to pure functions in functional programming,
+ in contrast to WebAssembly functions which consist of a sequence of instructions.
+
+ Ghost functions are helpful for abstracting expressions appearing in
+ 'Requires' \/ 'Ensures' \/ 'Assert's in a specification, to avoid repeating the
+ same expression multiple times. They can also be used recursively, which is
+ impossible to achieve in expressions. A ghost function is recursive if it
+ includes a call to itself in its expression body ('ghostExpr'), and a set of
+ ghost functions are mutually recursive if they depend on each other.
+
+ They are called "ghost functions" because they don't appear in the WebAssembly module.
+-}
 data GhostFunction = GhostFunction
   { ghostName :: Identifier,
     ghostArgs :: [TypedIdentifier],
@@ -80,7 +93,7 @@ data Declaration
  * An @if \<boolean expr\> then \<expr\> else \<expr\>@.
  * A boolean value, i.e. @true@, @false@.
  * An integer value.
- * An expression using the functions provided by the [Core theory](https://smt  lib.cs.uiowa.edu/theories-Core.shtml) from SMTLIB2.
+ * An expression using the functions provided by the [Core theory](https://smtlib.cs.uiowa.edu/theories-Core.shtml) from SMTLIB2.
  * An expression using the functions provided by the [Ints theory](https://smtlib.cs.uiowa.edu/theories-Ints.shtml) from SMTLIB2.
 
  Expressions are untyped in this ADT, but will be typed
