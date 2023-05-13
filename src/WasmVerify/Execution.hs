@@ -328,6 +328,17 @@ executeInstruction specModule (Wasm.Call index) = do
       addAssertSMT $ exprToSMT postcondition
       appendToSMT "\n"
     Nothing -> return () -- TODO. Throw an error when there's no spec for the called function?
+executeInstruction _ Wasm.Drop = void popFromStack
+executeInstruction _ Wasm.Select = do
+  topValue3 <- popFromStack
+  topValue2 <- popFromStack
+  topValue1 <- popFromStack
+  addAssertSMT $
+    exprToSMT $
+      IfThenElse
+        (BEq (stackValueToExpr topValue3) (IInt 0))
+        (stackValueToExpr topValue2)
+        (stackValueToExpr topValue1)
 executeInstruction _ (Wasm.GetLocal index) = do
   let identifier = indexToVar index
   varVersion <- lookupVarVersion identifier
