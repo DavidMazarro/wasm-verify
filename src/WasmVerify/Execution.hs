@@ -16,7 +16,6 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as Lazy
-import Debug.Trace (trace, traceShow)
 import GHC.Natural
 import qualified Language.Wasm as Wasm
 import qualified Language.Wasm.Structure as Wasm hiding (Import (desc, name))
@@ -65,7 +64,7 @@ executeFunction specModule (name, wasmFunction) = do
 
       -- Symbolic execution of all execution paths
       forM
-        (zip (traceShow paths paths) [0 ..])
+        (zip paths [0 ..])
         ( \(path, pathIndex) ->
             executePath specModule spec nodesAssertsMap cfgInitialsFinals pathIndex path
         )
@@ -200,7 +199,7 @@ executeNodesInPath specModule cfg nodes = do
     -- When there's a node to be executed next, we include in the SMT module
     -- an assertion with the contents of the annotation in the transition (edge)
     -- between the current node and the next node.
-    when (isJust $ trace (show (currentNodeLabel, mNextNodeLabel)) mNextNodeLabel) $ do
+    when (isJust mNextNodeLabel) $ do
       -- The use of 'fromJust' here is safe because we have
       -- just checked whether the value is 'Nothing' or not
       -- (and in that case, we throw a custom failure)
@@ -217,46 +216,27 @@ executeNode :: VerifiWASM.Program -> Node -> WasmVerify ()
 executeNode specModule (Node (_, instructions)) =
   forM_ instructions (executeInstruction specModule . snd)
 
--- TODO: Add special treatment for function calls. See Manuel's notes.
--- When you check the spec of a function, you assume the precondition and
--- check the postcondition. When you call a function it's the opposite:
--- you check the precondition and assume the poscondition holds (because
--- you already verified the function).
+-- (TODO: Add thesis section here).
+{- | Performs the symbolic execution of a single 'Wasm.Instruction',
+ materializing any changes that need to be applied to the state.
+ This includes handling the symbolic execution stack. For more details
+ on how the symbolic execution is performed for each expression, take a look
+ at the implementation of this function or the relevant section in the thesis. 
+-}
 executeInstruction :: VerifiWASM.Program -> Wasm.Instruction Natural -> WasmVerify ()
+-- For control instructions, the symbolic execution just skips over them
+-- since we have taken care of their control flow in the CFG step and the
+-- annotations corresponding to the control branching are added in 'executeNodesInPath'.
 executeInstruction _ (Wasm.Block _ _) = return ()
 executeInstruction _ (Wasm.Loop _ _) = return ()
+executeInstruction _ (Wasm.If _ _ _) = return ()
 executeInstruction _ (Wasm.Br _) = return ()
 executeInstruction _ (Wasm.BrIf _) = return ()
 executeInstruction _ Wasm.Return = return ()
-executeInstruction _ (Wasm.GetLocal index) = do
-  let identifier = indexToVar index
-  varVersion <- lookupVarVersion identifier
-  let stackValue = ValueVar $ versionedVarToIdentifier (identifier, varVersion)
-  void $ pushToStack stackValue
-executeInstruction _ (Wasm.SetLocal index) = do
-  topValue <- popFromStack
-  let identifier = indexToVar index
-  varVersion <- newVarVersion identifier
-  addAssertSMT =<< varEqualsExpr (identifier, varVersion) (stackValueToExpr topValue)
--- TODO: Add support for tee
--- executeInstruction (Wasm.TeeLocal index) = do
---   undefined
-executeInstruction _ (Wasm.I32Const n) = do
-  let stackValue = ValueConst $ toInteger n
-  void . pushToStack $ stackValue
-executeInstruction _ (Wasm.I64Const n) = do
-  let stackValue = ValueConst $ toInteger n
-  void . pushToStack $ stackValue
-executeInstruction _ (Wasm.IRelOp _ relOp) = do
-  operationResult <- executeIRelOp relOp
-  (resultVar, version) <- newResultVar
-  addAssertSMT =<< varEqualsExpr (resultVar, version) operationResult
-  void . pushToStack $ ValueVar $ versionedVarToIdentifier (resultVar, version)
-executeInstruction _ (Wasm.IBinOp _ binOp) = do
-  operationResult <- executeIBinOp binOp
-  (resultVar, version) <- newResultVar
-  addAssertSMT =<< varEqualsExpr (resultVar, version) operationResult
-  void . pushToStack $ ValueVar $ versionedVarToIdentifier (resultVar, version)
+-- When you check the spec of a function, you assume the precondition and
+-- check the postcondition. When you call a function it's the opposite:
+-- you check the precondition and assume the poscondition holds.
+-- That's the gist of the symbolic execution implementation here.
 executeInstruction specModule (Wasm.Call index) = do
   functionIndicesBimap <- gets wasmFunctionIndicesBimap
   let name = functionIndicesBimap Bimap.!> naturalToInt index
@@ -296,6 +276,35 @@ executeInstruction specModule (Wasm.Call index) = do
       addAssertSMT $ exprToSMT postcondition
       appendToSMT "\n"
     Nothing -> return () -- TODO. Throw an error when there's no spec for the called function?
+executeInstruction _ (Wasm.GetLocal index) = do
+  let identifier = indexToVar index
+  varVersion <- lookupVarVersion identifier
+  let stackValue = ValueVar $ versionedVarToIdentifier (identifier, varVersion)
+  void $ pushToStack stackValue
+executeInstruction _ (Wasm.SetLocal index) = do
+  topValue <- popFromStack
+  let identifier = indexToVar index
+  varVersion <- newVarVersion identifier
+  addAssertSMT =<< varEqualsExpr (identifier, varVersion) (stackValueToExpr topValue)
+-- TODO: Add support for tee
+-- executeInstruction (Wasm.TeeLocal index) = do
+--   undefined
+executeInstruction _ (Wasm.I32Const n) = do
+  let stackValue = ValueConst $ toInteger n
+  void . pushToStack $ stackValue
+executeInstruction _ (Wasm.I64Const n) = do
+  let stackValue = ValueConst $ toInteger n
+  void . pushToStack $ stackValue
+executeInstruction _ (Wasm.IRelOp _ relOp) = do
+  operationResult <- executeIRelOp relOp
+  (resultVar, version) <- newResultVar
+  addAssertSMT =<< varEqualsExpr (resultVar, version) operationResult
+  void . pushToStack $ ValueVar $ versionedVarToIdentifier (resultVar, version)
+executeInstruction _ (Wasm.IBinOp _ binOp) = do
+  operationResult <- executeIBinOp binOp
+  (resultVar, version) <- newResultVar
+  addAssertSMT =<< varEqualsExpr (resultVar, version) operationResult
+  void . pushToStack $ ValueVar $ versionedVarToIdentifier (resultVar, version)
 executeInstruction _ instruction =
   failWithError $
     Failure $
