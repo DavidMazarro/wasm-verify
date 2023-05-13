@@ -307,7 +307,6 @@ typeExprParser = do
   (keyword "bool" >> return ExprBool)
     <|> (keyword "integer" >> return ExprInt)
 
-
 typedIdParser :: Parser TypedIdentifier
 typedIdParser = do
   identifier <- identifierParser

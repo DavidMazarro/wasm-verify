@@ -32,7 +32,7 @@ verifyModule ::
 verifyModule program wasmModule = do
   smtFunctionsMap <- runWasmVerify $ executeProgram program wasmModule
   verificationResults <- forM (Map.assocs smtFunctionsMap) verifyFunction
-  T.putStrLn "──────────────────────────────────────\n"
+  T.putStrLn "──────────────────────────────────────"
   if any (== False) verificationResults
     then
       T.putStrLn $
@@ -57,10 +57,10 @@ verifyFunction (funcName, pathsSMT) = do
   resultsSMT <- forM pathsSMT runZ3
   if any (== "sat") $ concat resultsSMT
     then do
-      T.putStrLn . failureText $ T.pack funcName <> " does not match its specification.\n"
+      T.putStrLn . failureText $ T.pack funcName <> " does not match its specification."
       return False
     else do
-      T.putStrLn . successText $ T.pack funcName <> " matches its specification.\n"
+      T.putStrLn . successText $ T.pack funcName <> " matches its specification."
       return True
 
 {- | Runs the Z3 solver with the SMT module provided and returns the results

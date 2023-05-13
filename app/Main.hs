@@ -17,10 +17,14 @@ import Options.Applicative
 import Options.Applicative.Extra (helperWith)
 import Path
 import Paths_wasm_verify (version)
+import System.Directory (makeAbsolute)
 import System.Process (readProcessWithExitCode)
 import Text.Pretty.Simple (pPrint)
+import VerifiWASM.ASTValidator (validate)
 import VerifiWASM.Parser (parseVerifiWASMFile)
+import VerifiWASM.VerifiWASM (runVerifiWASM)
 import WasmVerify
+import WasmVerify.ToSMT (ghostFunctionsToSMT)
 
 ----------------------------------------------------------------------------
 
@@ -74,8 +78,8 @@ parserInfo =
 main :: IO ()
 main = do
   Options{..} <- execParser parserInfo
-  filepath <- parseAbsFile file
-  specFilepath <- parseAbsFile spec
+  filepath <- parseAbsFile =<< makeAbsolute file
+  specFilepath <- parseAbsFile =<< makeAbsolute spec
   fileExt <- fileExtension filepath
   specFileExt <- fileExtension specFilepath
 
@@ -85,15 +89,19 @@ main = do
     ".wasm" -> do
       wasmModule <- loadModuleFromFile filepath
       when debugWasmADT $ pPrint wasmModule
-      when debugWasmADT $ pPrint $ wasmModuleToCFG wasmModule
     _ -> do
       fail "The file extension must be .wasm or .smt2"
 
   case specFileExt of
     ".verifiwasm" -> do
+      wasmModule <- loadModuleFromFile filepath
       mProgram <- parseVerifiWASMFile specFilepath
       case mProgram of
-        (Just program) -> when debugSpecADT $ pPrint program
+        (Just program) -> do
+          runVerifiWASM $ validate program wasmModule
+          when debugSpecADT $ pPrint program
+          when debugSpecADT $ pPrint $ ghostFunctionsToSMT program
+          verifyModule program wasmModule
         Nothing -> return ()
     _ -> do
       fail "The specification file extension must be .verifiwasm"

@@ -72,6 +72,7 @@ executable wasm-verify
   other-modules:    Paths_wasm_verify
   build-depends:
     , base                  >=4.7 && <5
+    , directory
     , optparse-applicative
     , path
     , pretty-simple
