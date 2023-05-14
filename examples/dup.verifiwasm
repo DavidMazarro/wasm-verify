@@ -1,0 +1,3 @@
+spec dup(n : i32) returns (x : i32) {
+  ensures x == 2*n;
+}
