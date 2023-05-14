@@ -53,6 +53,9 @@
   require that its operands are integer expressions, @if-then-else@ requires
   that the condition is a boolean expression and the @then@ body and @else@ body
   are of the same type, etc.
+  - The expressions in 'Requires' \/ 'Ensures' \/ 'Assert's __must__ be boolean expressions.
+  Nested subexpressions can be integer or boolean expressions, but the topmost expression
+  must return a boolean value.
   - Ghost function calls appearing in expressions require:
       - That the called ghost function exists in the VerifiWASM module.
       - That the number of arguments received matches with the number of
@@ -261,22 +264,33 @@ validateTermination ghostFun (Decreases identifiers) = do
             <> "\nVariables appearing in a termination condition must"
             <> " refer to the arguments of the ghost function."
 
--- TODO: Ensure that requires is a boolean expression. Add to the list of validations.
 -- TODO: Ensure that requires only reference argument variables. Add to the list of validations.
 validateRequires :: Requires -> VerifiWASM ()
-validateRequires (Requires expr) = void . validateExpr $ expr
+validateRequires (Requires expr) = do
+  requiresType <- validateExpr $ expr
+  when (requiresType /= ExprBool) $
+    failWithError $
+      Failure $
+        "The \"requires\" expression is not a boolean expression: " <> (bold . pack . show) expr
 
--- TODO: Ensure that ensures is a boolean expression. Add to the list of validations.
 -- TODO: Ensure that ensures only reference argument or return variables. Add to the list of validations.
 validateEnsures :: Ensures -> VerifiWASM ()
-validateEnsures (Ensures expr) = void . validateExpr $ expr
+validateEnsures (Ensures expr) = do
+  ensuresType <- validateExpr $ expr
+  when (ensuresType /= ExprBool) $
+    failWithError $
+      Failure $
+        "The \"ensures\" expression is not a boolean expression: " <> (bold . pack . show) expr
 
--- TODO: Ensure that an assert is a boolean expression. Add to the list of validations.
 -- TODO: Ensure that an assert only references argument or local variables. Add to the list of validations.
 validateAssert :: Assert -> VerifiWASM ()
 validateAssert (Assert (instrIndex, expr)) = do
   when (instrIndex == 0) indexOutOfBoundsErr
-  void . validateExpr $ expr
+  assertType <- validateExpr $ expr
+  when (assertType /= ExprBool) $
+    failWithError $
+      Failure $
+        "One of the \"assert\" expressions is not a boolean expression: " <> (bold . pack . show) expr
   where
     indexOutOfBoundsErr =
       failWithError $
