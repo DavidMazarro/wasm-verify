@@ -333,12 +333,14 @@ executeInstruction _ Wasm.Select = do
   topValue3 <- popFromStack
   topValue2 <- popFromStack
   topValue1 <- popFromStack
+  (resultVar, version) <- newResultVar
+  void . pushToStack $ ValueVar $ versionedVarToIdentifier (resultVar, version)
   addAssertSMT $
     exprToSMT $
       IfThenElse
         (BEq (stackValueToExpr topValue3) (IInt 0))
-        (stackValueToExpr topValue2)
-        (stackValueToExpr topValue1)
+        (BEq (IVar $ versionedVarToIdentifier (resultVar, version)) (stackValueToExpr topValue2))
+        (BEq (IVar $ versionedVarToIdentifier (resultVar, version)) (stackValueToExpr topValue1))
 executeInstruction _ (Wasm.GetLocal index) = do
   let identifier = indexToVar index
   varVersion <- lookupVarVersion identifier
@@ -479,8 +481,9 @@ newResultVar = do
   where
     removePrefix prefix original = fromMaybe original $ stripPrefix prefix original
 
-{- | Given the name of a variable (an identifier), generates a new
- version of the variable from the latest version used in the symbolic execution.
+{- | Given the name of a variable (an identifier), it returns a new
+ version of the variable from the latest version used in the symbolic execution,
+ and updates 'identifierMap' in the symbolic execution context.
 -}
 newVarVersion :: Identifier -> WasmVerify IdVersion
 newVarVersion identifier = do
@@ -495,6 +498,9 @@ newVarVersion identifier = do
     insertNewVersion identifier' newVer state =
       state{identifierMap = Map.insert identifier' newVer (identifierMap state)}
 
+{- | Given the name of a variable, it returns its latest version in the
+ symbolic execution context at the moment of being called. Taken from 'identifierMap'.
+-}
 lookupVarVersion :: Identifier -> WasmVerify IdVersion
 lookupVarVersion identifier = do
   -- The use of 'Map.!' is safe here because we have populated
@@ -613,8 +619,9 @@ replaceWithVersionedVars varToExprMap (IAbs expr) =
 
 -- * Helper functions
 
--- Returns SMT code for when a versioned variable is equals
--- to a VerifiWASM expression (which gets formatted as SMT).
+{- | Returns SMT code for when a versioned variable is equals
+ to a VerifiWASM expression (which gets formatted as SMT).
+-}
 varEqualsExpr :: VersionedVar -> Expr -> WasmVerify Text
 varEqualsExpr var stackValue = do
   let identifier = versionedVarToIdentifier var
