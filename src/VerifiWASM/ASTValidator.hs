@@ -56,6 +56,16 @@
   - The expressions in 'Requires' \/ 'Ensures' \/ 'Assert's __must__ be boolean expressions.
   Nested subexpressions can be integer or boolean expressions, but the topmost expression
   must return a boolean value.
+  - 'Requires' \/ 'Ensures' \/ 'Assert's each have a scope of variables that can be
+  used in their expressions:
+      - 'Requires' expressions can make use of arguments, both for function specifications
+      and ghost functions. In the case of function specifications, the expression in a 'Requires'
+      cannot contain references to local variables or return variables since those are not
+      in scope before executing the function.
+      - 'Ensures' expressions can make use of arguments and return variables, but not
+      local variables since after the function finishes executing those are already out of scope.
+      - 'Assert's expressions can make use of arguments and local variables, but not
+      return variables since they are not in scope until the function finishes its execution.
   - Ghost function calls appearing in expressions require:
       - That the called ghost function exists in the VerifiWASM module.
       - That the number of arguments received matches with the number of
@@ -70,7 +80,7 @@ module VerifiWASM.ASTValidator where
 import Control.Monad (unless, void, when)
 import Control.Monad.State (get, gets, put)
 import Data.Containers.ListUtils (nubOrd)
-import Data.List (find, intercalate, intersect)
+import Data.List (find, intercalate, intersect, (\\))
 import qualified Data.Map as M
 import Data.Maybe (fromJust, isNothing)
 import Data.Text (Text, pack)
@@ -103,9 +113,8 @@ validate program wasmModule = do
         localTypes = ("", M.empty),
         ghostFunReturnTypes = ghostFunReturnTypes
       }
-  let functionAndGhostNames = allFunctionAndGhostNames program
-  mapM_ (validateGhostFun functionAndGhostNames) (ghostFunctions program)
-  mapM_ (validateFunction functionAndGhostNames) (functions program)
+  mapM_ (validateGhostFun program) (ghostFunctions program)
+  mapM_ (validateFunction program) (functions program)
   where
     wasmFunctions =
       concatMap
@@ -201,10 +210,10 @@ validateSpecArgReturnTypes wasmModule wasmFunctions spec = do
             <> (bold . pack . show)
               wasmTypes
 
-validateFunction :: [Identifier] -> FunctionSpec -> VerifiWASM ()
-validateFunction functionAndGhostNames function = do
+validateFunction :: Program -> FunctionSpec -> VerifiWASM ()
+validateFunction program funcSpec = do
   -- Sets the local context
-  let name = funcName function
+  let name = funcName funcSpec
   types <- lookupTypesInFunction name
   ContextState{..} <- get
   put $ ContextState{globalTypes, localTypes = (name, types), ghostFunReturnTypes}
@@ -213,15 +222,23 @@ validateFunction functionAndGhostNames function = do
   unless (null identifierCollissions) $
     argsIdentifiersCollissionsErr "function specification" "arguments" name identifierCollissions
 
-  validateLocalIdentifiers functionAndGhostNames (locals . specBody $ function)
-  validateRequires (requires . specBody $ function)
-  validateEnsures (ensures . specBody $ function)
-  mapM_ validateAssert $ asserts . specBody $ function
+  validateLocalIdentifiers functionAndGhostNames (locals . specBody $ funcSpec)
+  validateRequires False (funcArgs funcSpec) (requires . specBody $ funcSpec)
+  validateEnsures (funcArgs funcSpec ++ funcReturns funcSpec) (ensures . specBody $ funcSpec)
+  mapM_
+    ( validateAssert
+        ( funcArgs funcSpec
+            ++ concatMap localVars (locals . specBody $ funcSpec)
+            ++ funcReturns funcSpec
+        )
+    )
+    $ (asserts . specBody) funcSpec
   where
-    funcArgsIdentifiers = map fst . funcArgs $ function
+    functionAndGhostNames = allFunctionAndGhostNames program
+    funcArgsIdentifiers = map fst . funcArgs $ funcSpec
 
-validateGhostFun :: [Identifier] -> GhostFunction -> VerifiWASM ()
-validateGhostFun functionAndGhostNames ghostFun = do
+validateGhostFun :: Program -> GhostFunction -> VerifiWASM ()
+validateGhostFun program ghostFun = do
   -- Sets the local context
   let name = ghostName ghostFun
   (_, types) <- lookupTypesInGhostFun name
@@ -234,8 +251,9 @@ validateGhostFun functionAndGhostNames ghostFun = do
 
   void . validateExpr . ghostExpr $ ghostFun
   validateTermination ghostFun (ghostTermination ghostFun)
-  validateRequires (ghostRequires ghostFun)
+  validateRequires True (ghostArgs ghostFun) (ghostRequires ghostFun)
   where
+    functionAndGhostNames = allFunctionAndGhostNames program
     ghostArgsIdentifiers = map fst . ghostArgs $ ghostFun
 
 validateTermination :: GhostFunction -> Termination -> VerifiWASM ()
@@ -264,33 +282,55 @@ validateTermination ghostFun (Decreases identifiers) = do
             <> "\nVariables appearing in a termination condition must"
             <> " refer to the arguments of the ghost function."
 
--- TODO: Ensure that requires only reference argument variables. Add to the list of validations.
-validateRequires :: Requires -> VerifiWASM ()
-validateRequires (Requires expr) = do
-  requiresType <- validateExpr $ expr
-  when (requiresType /= ExprBool) $
-    failWithError $
+validateRequires ::
+  -- | 'True' in the case of a 'GhostFunction', 'False' in the case of a 'FunctionSpec'.
+  Bool ->
+  -- | The scope of valid identifiers for the 'Requires' expression.
+  [TypedIdentifier] ->
+  Requires ->
+  VerifiWASM ()
+validateRequires isGhost varScope (Requires expr) = do
+  requiresType <- validateExpr expr
+  validateBooleanAndScope "requires" expr requiresType varScope requiresScopeErr
+  where
+    requiresScopeErr =
       Failure $
-        "The \"requires\" expression is not a boolean expression: " <> (bold . pack . show) expr
+        "A \"requires\" expression can only contain identifiers declared in the arguments"
+          <> ( if isGhost
+                then ".\n"
+                else
+                  ", but not in local variables or in the returns,"
+                    <> " since those are not in scope before executing the function.\n"
+             )
+          <> "This is the failing expression: "
+          <> (bold . pack . show) expr
 
--- TODO: Ensure that ensures only reference argument or return variables. Add to the list of validations.
-validateEnsures :: Ensures -> VerifiWASM ()
-validateEnsures (Ensures expr) = do
-  ensuresType <- validateExpr $ expr
-  when (ensuresType /= ExprBool) $
-    failWithError $
+validateEnsures ::
+  -- | The scope of valid identifiers for the 'Requires' expression.
+  [TypedIdentifier] ->
+  Ensures ->
+  VerifiWASM ()
+validateEnsures varScope (Ensures expr) = do
+  ensuresType <- validateExpr expr
+  validateBooleanAndScope "ensures" expr ensuresType varScope ensuresScopeErr
+  where
+    ensuresScopeErr =
       Failure $
-        "The \"ensures\" expression is not a boolean expression: " <> (bold . pack . show) expr
+        "An \"ensures\" expression can only contain identifiers declared in the arguments"
+          <> " or in the returns, but not in local variables, since those are out of scope"
+          <> " after execution the function.\nThis is the failing expression: "
+          <> (bold . pack . show) expr
 
--- TODO: Ensure that an assert only references argument or local variables. Add to the list of validations.
-validateAssert :: Assert -> VerifiWASM ()
-validateAssert (Assert (instrIndex, expr)) = do
+validateAssert ::
+  -- | The scope of valid identifiers for the 'Requires' expression.
+  [TypedIdentifier] ->
+  Assert ->
+  VerifiWASM ()
+validateAssert varScope (Assert (instrIndex, expr)) = do
   when (instrIndex == 0) indexOutOfBoundsErr
-  assertType <- validateExpr $ expr
-  when (assertType /= ExprBool) $
-    failWithError $
-      Failure $
-        "One of the \"assert\" expressions is not a boolean expression: " <> (bold . pack . show) expr
+
+  assertType <- validateExpr expr
+  validateBooleanAndScope "assert" expr assertType varScope assertScopeErr
   where
     indexOutOfBoundsErr =
       failWithError $
@@ -300,6 +340,13 @@ validateAssert (Assert (instrIndex, expr)) = do
               instrIndex
             <> " was found in an assert,"
             <> " but instruction indices cannot be 0."
+    assertScopeErr =
+      Failure $
+        "An \"assert\" expression can only contain identifiers declared in the arguments,"
+          <> " or in the local variables, but not in the returns, since those are not in"
+          <> " scope before the function finishes executing.\n"
+          <> "This is the failing expression: "
+          <> (bold . pack . show) expr
 
 {- | Ensures that the names of local variables don't clash with
   the names of existing ghost functions and function specifications.
@@ -737,6 +784,69 @@ allFunctionAndGhostNames Program{functions, ghostFunctions} = functionNames ++ g
   where
     functionNames = map funcName functions
     ghostFunctionNames = map ghostName ghostFunctions
+
+validateBooleanAndScope :: Text -> Expr -> ExprType -> [TypedIdentifier] -> Failure -> VerifiWASM ()
+validateBooleanAndScope requiresEnsuresOrAssert expr exprType varScope scopeErr = do
+  when (exprType /= ExprBool) $
+    failWithError $
+      Failure $
+        "One of the \""
+          <> requiresEnsuresOrAssert
+          <> "\" expressions is not a boolean expression: "
+          <> (bold . pack . show) expr
+
+  -- When the difference between the list of identifiers in the expression
+  -- and the list of identifiers in the scope is not the empty list,
+  -- that means there are some identifiers appearing in the expression that
+  -- are not in the scope. In that case we throw an error.
+  unless (null (identifiersInExpr expr \\ map fst varScope)) $ failWithError scopeErr
+
+-- | Returns all of the identifiers that can be found in a given expression.
+identifiersInExpr :: Expr -> [Identifier]
+identifiersInExpr (FunCall _ args) =
+  concatMap identifiersInExpr args
+identifiersInExpr (IfThenElse ifExpr thenExpr elseExpr) =
+  identifiersInExpr ifExpr ++ identifiersInExpr thenExpr ++ identifiersInExpr elseExpr
+identifiersInExpr BFalse = []
+identifiersInExpr BTrue = []
+identifiersInExpr (BNot subExpr) =
+  identifiersInExpr subExpr
+identifiersInExpr (BImpl leftExpr rightExpr) =
+  identifiersInExpr leftExpr ++ identifiersInExpr rightExpr
+identifiersInExpr (BAnd leftExpr rightExpr) =
+  identifiersInExpr leftExpr ++ identifiersInExpr rightExpr
+identifiersInExpr (BOr leftExpr rightExpr) =
+  identifiersInExpr leftExpr ++ identifiersInExpr rightExpr
+identifiersInExpr (BXor leftExpr rightExpr) =
+  identifiersInExpr leftExpr ++ identifiersInExpr rightExpr
+identifiersInExpr (BEq leftExpr rightExpr) =
+  identifiersInExpr leftExpr ++ identifiersInExpr rightExpr
+identifiersInExpr (BDistinct leftExpr rightExpr) =
+  identifiersInExpr leftExpr ++ identifiersInExpr rightExpr
+identifiersInExpr (BLessOrEq leftExpr rightExpr) =
+  identifiersInExpr leftExpr ++ identifiersInExpr rightExpr
+identifiersInExpr (BLess leftExpr rightExpr) =
+  identifiersInExpr leftExpr ++ identifiersInExpr rightExpr
+identifiersInExpr (BGreaterOrEq leftExpr rightExpr) =
+  identifiersInExpr leftExpr ++ identifiersInExpr rightExpr
+identifiersInExpr (BGreater leftExpr rightExpr) =
+  identifiersInExpr leftExpr ++ identifiersInExpr rightExpr
+identifiersInExpr (IVar identifier) = [identifier]
+identifiersInExpr (IInt _) = []
+identifiersInExpr (INeg subExpr) =
+  identifiersInExpr subExpr
+identifiersInExpr (IMinus leftExpr rightExpr) =
+  identifiersInExpr leftExpr ++ identifiersInExpr rightExpr
+identifiersInExpr (IPlus leftExpr rightExpr) =
+  identifiersInExpr leftExpr ++ identifiersInExpr rightExpr
+identifiersInExpr (IMult leftExpr rightExpr) =
+  identifiersInExpr leftExpr ++ identifiersInExpr rightExpr
+identifiersInExpr (IDiv leftExpr rightExpr) =
+  identifiersInExpr leftExpr ++ identifiersInExpr rightExpr
+identifiersInExpr (IMod leftExpr rightExpr) =
+  identifiersInExpr leftExpr ++ identifiersInExpr rightExpr
+identifiersInExpr (IAbs subExpr) =
+  identifiersInExpr subExpr
 
 notFoundGhostFunErr :: Identifier -> VerifiWASM ()
 notFoundGhostFunErr name =
