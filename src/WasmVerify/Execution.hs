@@ -199,7 +199,9 @@ executePath specModule spec nodesAssertsMap (cfg, initial, finals) pathIndex pat
             return $ Map.insert (fst ret) (stackValueToExpr topValue) varMap
         )
         varToExprMap
-        $ funcReturns funcSpec
+        -- We apply 'reverse' here because when popping values we
+        -- are traversing the stack in reverse order.
+        $ reverse (funcReturns funcSpec)
     initializeIdentifierMap :: VerifiWASM.FunctionSpec -> WasmVerify ()
     initializeIdentifierMap funcSpec = do
       state <- get
