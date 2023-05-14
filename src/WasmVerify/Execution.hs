@@ -55,7 +55,7 @@ executeProgram program wasmModule = do
     ( \smtMap funcSpec -> do
         -- '(!!)' from lists is safe here by construction of the map of WASM functions,
         -- and 'Map.!' is safe here because we have already validated that there exists
-        -- a WASM function for each of the specs in the VerifiWASM program (see 'ASTValidator.validate')
+        -- a WASM function for each of the specs in the VerifiWASM program (see 'Validation.validate')
         let wasmFunction = (Wasm.functions . Wasm.getModule $ wasmModule) !! (wasmFunctionsBimap Bimap.! funcName funcSpec)
         smtFunction <- executeFunction program (funcName funcSpec, wasmFunction)
         return $ Map.insert (funcName funcSpec) smtFunction smtMap

@@ -98,7 +98,7 @@ data Declaration
 
  Expressions are untyped in this ADT, but will be typed
  (just with the boolean and integer types) and checked for soundness
- after the parsing step in the 'ASTValidator' module.
+ after the parsing step in the 'Validation' module.
 
  The data constructors starting with a \'@B@\' encode boolean expressions,
  the ones starting with a \'@I@\' encode integer expressions.

@@ -75,7 +75,7 @@
   - In an expression, it only makes sense to do a function call on a ghost function.
   Trying to call a function specification in an expression will result in an error.
 -}
-module VerifiWASM.ASTValidator where
+module VerifiWASM.Validation where
 
 import Control.Monad (unless, void, when)
 import Control.Monad.State (get, gets, put)

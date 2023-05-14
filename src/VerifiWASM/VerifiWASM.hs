@@ -31,7 +31,7 @@ type VerifiWASM a = ExceptT Failure (StateT ContextState (Writer Builder)) a
 data ContextState = ContextState
   { -- | Contains the types of all variables in functions/ghost functions
     -- in a VerifiWASM file. Once initialised at the
-    -- 'VerifiWASM.ASTValidator.validate' step, it doesn't change in the
+    -- 'VerifiWASM.Validation.validate' step, it doesn't change in the
     -- rest of the execution of the 'VerifiWASM' monad.
     globalTypes :: FunTypes,
     -- | Serves as a local scope, containing the tuple of the name and the types
@@ -40,7 +40,7 @@ data ContextState = ContextState
     -- the validation of expressions.
     localTypes :: (Identifier, VarTypes),
     -- | Contains the return types of all ghost functions in a VerifiWASM file.
-    -- Once initialised at the 'VerifiWASM.ASTValidator.validate' step,
+    -- Once initialised at the 'VerifiWASM.Validation.validate' step,
     -- it doesn't change in the rest of the execution of the 'VerifiWASM' monad.
     ghostFunReturnTypes :: GhostFunReturnTypes
   }

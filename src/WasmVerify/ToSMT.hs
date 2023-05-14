@@ -126,7 +126,7 @@ recursionSets = stronglyConnComp . funDepGraph
     -- Finds the whole ghost function in the program given its name.
     findGhostFunInProgram :: Program -> Identifier -> GhostFunction
     findGhostFunInProgram program ghostFun =
-      -- The use of 'findJust' here is safe, because in 'ASTValidator' we have
+      -- The use of 'findJust' here is safe, because in 'Validation' we have
       -- already checked if the ghost functions called in expressions exist.
       findJust ((== ghostFun) . ghostName) $ ghostFunctions program
 

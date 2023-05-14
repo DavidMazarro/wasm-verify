@@ -31,9 +31,9 @@ library
   hs-source-dirs:   src
   exposed-modules:
     Helpers.ANSI
-    VerifiWASM.ASTValidator
     VerifiWASM.LangTypes
     VerifiWASM.Parser
+    VerifiWASM.Validation
     VerifiWASM.VerifiWASM
     WasmVerify
     WasmVerify.CFG
