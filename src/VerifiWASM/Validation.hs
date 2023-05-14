@@ -80,9 +80,10 @@ module VerifiWASM.Validation where
 import Control.Monad (unless, void, when)
 import Control.Monad.State (get, gets, put)
 import Data.Containers.ListUtils (nubOrd)
-import Data.List (find, intercalate, intersect, (\\))
+import Data.List (find, intercalate, intersect)
 import qualified Data.Map as M
 import Data.Maybe (fromJust, isNothing)
+import qualified Data.Set as Set
 import Data.Text (Text, pack)
 import qualified Data.Text.Lazy as Lazy
 import GHC.Natural
@@ -799,7 +800,10 @@ validateBooleanAndScope requiresEnsuresOrAssert expr exprType varScope scopeErr 
   -- and the list of identifiers in the scope is not the empty list,
   -- that means there are some identifiers appearing in the expression that
   -- are not in the scope. In that case we throw an error.
-  unless (null (identifiersInExpr expr \\ map fst varScope)) $ failWithError scopeErr
+  unless (null (setIdentifiersInExpr Set.\\ setVarScope)) $ failWithError scopeErr
+  where
+    setIdentifiersInExpr = Set.fromList $ identifiersInExpr expr
+    setVarScope = Set.fromList $ map fst varScope
 
 -- | Returns all of the identifiers that can be found in a given expression.
 identifiersInExpr :: Expr -> [Identifier]
