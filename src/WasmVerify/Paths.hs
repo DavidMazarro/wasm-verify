@@ -175,8 +175,8 @@ checkAssertsForSCC spec nodesAssertsMap scc =
  of nodes that are executed. Every path returned by this function
  falls into one of the following types of paths:
 
-    - An execution from the initial node (precondition) to one of
-    the final nodes (postconditions). No asserts found in-between.
+    - An execution from the initial node (precondition) to 
+    the final node (postcondition). No asserts found in-between.
 
         - In the case of simple WebAssembly functions, it could happen that
         the 'CFG' consists only of one node, which would be both the initial
@@ -187,12 +187,11 @@ checkAssertsForSCC spec nodesAssertsMap scc =
     - An execution from a node with an assert to another node with
     an assert. If the start and end nodes are the same, it represents
     the execution of a loop.
-    - An execution from a node with an assert to one of the final
-    nodes (postconditions).
+    - An execution from a node with an assert to one the final node (postcondition).
 -}
 allExecutionPaths ::
-  -- | (The 'CFG', the initial node, the set of final nodes)
-  (CFG, NodeLabel, Set NodeLabel) ->
+  -- | (The 'CFG', the initial node, the final node)
+  (CFG, NodeLabel, NodeLabel) ->
   -- | List of nodes with an assert. These are the nodes that
   -- serve as a stopping point in the search process: execution
   -- paths going through an assert are split into the path before
@@ -200,10 +199,10 @@ allExecutionPaths ::
   -- a loop breaker in cyclic SCCs (those asserts are invariants).
   [NodeLabel] ->
   [[NodeLabel]]
-allExecutionPaths (cfg, initial, finals) nodesWithAssert =
+allExecutionPaths (cfg, initial, final) nodesWithAssert =
   let adjacencyMap = cfgToAdjacencyMap cfg
    in evalState
-        (searchPathsFromNode (adjacencyMap, initial, finals) nodesWithAssert [] [initial])
+        (searchPathsFromNode (adjacencyMap, initial, final) nodesWithAssert [] [initial])
         Set.empty
 
 {- | Recursive function used in 'allExecutionPaths' to do the search
@@ -212,8 +211,8 @@ allExecutionPaths (cfg, initial, finals) nodesWithAssert =
   execution paths have already been searched over in the 'CFG'.
 -}
 searchPathsFromNode ::
-  -- | (The 'CFG' as an adjacency map, the initial node, the set of final nodes)
-  (Map NodeLabel (Set NodeLabel), NodeLabel, Set NodeLabel) ->
+  -- | (The 'CFG' as an adjacency map, the initial node, the final node)
+  (Map NodeLabel (Set NodeLabel), NodeLabel, NodeLabel) ->
   -- | List of nodes with an assert. See 'allExecutionPaths' for more details.
   [NodeLabel] ->
   -- | Accumulator of paths. It should be set to the empty list
@@ -224,19 +223,19 @@ searchPathsFromNode ::
   [NodeLabel] ->
   -- | In the recursion, this returns the list of paths found so far.
   State (Set NodeLabel) [[NodeLabel]]
-searchPathsFromNode (adjacencyMap, initial, finals) nodesWithAssert paths queue =
+searchPathsFromNode (adjacencyMap, initial, final) nodesWithAssert paths queue =
   case queue of
     [] -> return paths
     (x : xs) -> do
       let newPaths = allPathsWithCondition (`elem` nodesWithAssert) adjacencyMap x
       modify (Set.insert x)
       used <- get
-      let beacons = (nubOrd . filter (not . flip Set.member (Set.union used finals)) . map last) newPaths
-      restOfPaths <- searchPathsFromNode (adjacencyMap, initial, finals) nodesWithAssert paths (xs ++ beacons)
+      let beacons = (nubOrd . filter (not . flip Set.member (Set.union used $ Set.singleton final)) . map last) newPaths
+      restOfPaths <- searchPathsFromNode (adjacencyMap, initial, final) nodesWithAssert paths (xs ++ beacons)
       return $ newPaths ++ restOfPaths
 
-{- | A list of execution paths from the provided node
- to nodes that either satisfy the provided condition or are final nodes.
+{- | A list of execution paths from the provided node to nodes that
+ satisfy the provided condition, or until the final node is reached.
 -}
 allPathsWithCondition ::
   -- | The condition in which the search algorithm stops

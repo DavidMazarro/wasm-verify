@@ -15,9 +15,9 @@ import WasmVerify.CFG.Types
 
 {- | Turns a WebAssembly function into its associated 'CFG',
  along with the initial node (starting point of the execution)
- and the set of final nodes (possible ending points of execution).
+ and the final node (ending point of execution).
 -}
-functionToCFG :: Wasm.Function -> (CFG, NodeLabel, Set NodeLabel)
+functionToCFG :: Wasm.Function -> (CFG, NodeLabel, NodeLabel)
 functionToCFG function = evalState (simplifyCFG <$> toCFGFunction function) (0, [])
 
 {- | Returns the list of strongly connected components in a
@@ -37,19 +37,20 @@ stronglyConnCompCFG cfg =
 
 {- | This function takes a WebAssembly function,
  calls 'toCFG' and adds a final node to the resulting CFG
- generated from the list of instructions in the body of the function.
- See 'toCFG' for the main logic.
+ (generated from the list of instructions in the body of the WebAssembly function).
+ See 'toCFG' for the main logic. After this, there's just a single
+ final node in the CFG.
 -}
 toCFGFunction ::
   Wasm.Function ->
-  State LabelState (CFG, NodeLabel, Set NodeLabel)
+  State LabelState (CFG, NodeLabel, NodeLabel)
 toCFGFunction (Wasm.Function _ _ functionBody) = do
   newLabel <- freshLabel
   void $ pushToLabelStack newLabel
   (bodyCFG, bodyInitial, bodyFinals) <- toCFG $ indexInstructions 1 functionBody
   let nodes = Node (newLabel, []) `Set.insert` nodeSet bodyCFG
   let edges = edgesFromFinals (edgeSet bodyCFG) newLabel bodyFinals
-  return (CFG (nodes, edges), bodyInitial, Set.singleton newLabel)
+  return (CFG (nodes, edges), bodyInitial, newLabel)
   where
     edgesFromFinals edges label finals =
       edges

@@ -20,8 +20,6 @@ import Data.List (find, isPrefixOf, sort, stripPrefix)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromJust, fromMaybe, isJust, mapMaybe)
-import Data.Set (Set)
-import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as Lazy
@@ -81,19 +79,19 @@ executeFunction specModule (name, wasmFunction) = do
   let mSpec = find ((== name) . funcName) $ functions specModule
   case mSpec of
     (Just spec) -> do
-      let cfgInitialsFinals@(cfg, _, _) = functionToCFG wasmFunction
+      let cfgInitialFinal@(cfg, _, _) = functionToCFG wasmFunction
       nodesAssertsMap <- getNodesAssertsMap cfg spec
       let sccs = stronglyConnCompCFG cfg
 
       forM_ sccs (checkAssertsForSCC spec nodesAssertsMap)
 
-      let paths = allExecutionPaths cfgInitialsFinals (map nodeLabel $ Map.keys nodesAssertsMap)
+      let paths = allExecutionPaths cfgInitialFinal (map nodeLabel $ Map.keys nodesAssertsMap)
 
       -- Symbolic execution of all execution paths
       forM
         (zip paths [0 ..])
         ( \(path, pathIndex) ->
-            executePath specModule spec nodesAssertsMap cfgInitialsFinals pathIndex path
+            executePath specModule spec nodesAssertsMap cfgInitialFinal pathIndex path
         )
 
     -- When the WebAssembly function doesn't have a specification in the VerifiWASM
@@ -111,11 +109,11 @@ executePath ::
   VerifiWASM.Program ->
   FunctionSpec ->
   Map Node Assert ->
-  (CFG, NodeLabel, Set NodeLabel) ->
+  (CFG, NodeLabel, NodeLabel) ->
   Int ->
   [NodeLabel] ->
   WasmVerify Lazy.Text
-executePath specModule spec nodesAssertsMap (cfg, initial, finals) pathIndex path = do
+executePath specModule spec nodesAssertsMap (cfg, initial, final) pathIndex path = do
   cleanSMT
   -- TODO: What do we do with ghost function preconditions?
   addGhostFunctionsToSMT specModule
@@ -144,11 +142,11 @@ executePath specModule spec nodesAssertsMap (cfg, initial, finals) pathIndex pat
   executeNodesInPath specModule cfg $
     map
       (getNodeFromLabel cfg)
-      -- If the last node in the path is a final node in the CFG,
-      -- we include it for execution. If it is not a final node, then
+      -- If the last node in the path is the final node of the CFG,
+      -- we include it for execution. If it is not the final node, then
       -- it means it's a node with an assertion, so that node will be executed
       -- in its respective path and is not executed in the current path.
-      (if isFinalNode lastNodeInPath then path else init path)
+      (if (== final) lastNodeInPath then path else init path)
 
   -- POSTCONDITION
   varToExprMapWithReturns <- getVarToExprMapWithReturns spec
@@ -213,8 +211,6 @@ executePath specModule spec nodesAssertsMap (cfg, initial, finals) pathIndex pat
                 | var <- [0 .. numArgs + numLocals - 1]
               ]
       put state{identifierMap = initialMap}
-    isFinalNode :: NodeLabel -> Bool
-    isFinalNode label = label `Set.member` finals
     assertionPre :: Map Identifier Expr -> NodeLabel -> WasmVerify Expr
     assertionPre varToExprMap label
       | label == initial =
@@ -223,7 +219,7 @@ executePath specModule spec nodesAssertsMap (cfg, initial, finals) pathIndex pat
           (replaceWithVersionedVars varToExprMap . snd . unAssert) (nodesAssertsMap Map.! (getNodeFromLabel cfg label))
     assertionPost :: Map Identifier Expr -> NodeLabel -> WasmVerify Expr
     assertionPost varToExprMap label
-      | isFinalNode label =
+      | label == final =
           (replaceWithVersionedVars varToExprMap . ensuresExpr . ensures . specBody) spec
       | otherwise =
           (replaceWithVersionedVars varToExprMap . snd . unAssert) (nodesAssertsMap Map.! (getNodeFromLabel cfg label))
