@@ -24,6 +24,8 @@ import VerifiWASM.ASTValidator (validate)
 import VerifiWASM.Parser (parseVerifiWASMFile)
 import VerifiWASM.VerifiWASM (runVerifiWASM)
 import WasmVerify
+import WasmVerify.Execution (executeProgram)
+import WasmVerify.Monad (runWasmVerify)
 import WasmVerify.ToSMT (ghostFunctionsToSMT)
 
 ----------------------------------------------------------------------------
@@ -32,7 +34,8 @@ data Options = Options
   { file :: FilePath,
     spec :: FilePath,
     debugWasmADT :: Bool,
-    debugSpecADT :: Bool
+    debugSpecADT :: Bool,
+    debugSMT :: Bool
   }
 
 parserInfo :: ParserInfo Options
@@ -40,36 +43,41 @@ parserInfo =
   info
     (helpParser <*> versionParser <*> optsParser)
     ( fullDesc
-        <> progDesc "A proof-of-concept formal verification tool for WASM"
+        <> progDesc "A proof-of-concept formal verification tool for WASM."
         <> header
-          "wasm-verify - A proof-of-concept formal verification tool for WASM"
+          "wasm-verify - A proof-of-concept formal verification tool for WASM."
     )
   where
     helpParser :: Parser (a -> a)
     helpParser =
       helperWith
-        ( long "help" <> short 'h' <> help "Displays help for the different commands"
+        ( long "help" <> short 'h' <> help "Displays help for the different commands."
         )
     versionParser =
       infoOption
         ("wasm-verify: " <> showVersion version)
-        (long "version" <> short 'v' <> help "Show version information")
+        (long "version" <> short 'v' <> help "Show version information.")
     optsParser :: Parser Options
     optsParser =
       Options
         <$> strArgument
-          (metavar "FILEPATH" <> help "Filepath to the WASM bytecode file")
+          (metavar "FILEPATH" <> help "Filepath to the WASM bytecode file.")
         <*> strOption
-          (long "spec" <> short 's' <> help "Filepath to the VerifiWASM specification file")
+          (long "spec" <> short 's' <> help "Filepath to the VerifiWASM specification file.")
         <*> switch
           ( long "debug-wasm-adt"
               <> help
-                "Outputs the Haskell ADT representation of the WASM module"
+                "Outputs the Haskell ADT representation of the WASM module."
           )
         <*> switch
           ( long "debug-spec-adt"
               <> help
-                "Outputs the Haskell ADT representation of the VerifiWASM specification"
+                "Outputs the Haskell ADT representation of the VerifiWASM specification."
+          )
+        <*> switch
+          ( long "debug-smt"
+              <> help
+                "Outputs the SMT modules, resulting from the symbolic execution, that verify the WebAssembly module."
           )
 
 ----------------------------------------------------------------------------
@@ -101,6 +109,7 @@ main = do
           runVerifiWASM $ validate program wasmModule
           when debugSpecADT $ pPrint program
           when debugSpecADT $ pPrint $ ghostFunctionsToSMT program
+          when debugSMT $ pPrint =<< runWasmVerify (executeProgram program wasmModule)
           verifyModule program wasmModule
         Nothing -> return ()
     _ -> do
