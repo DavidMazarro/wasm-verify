@@ -13,6 +13,13 @@ import qualified Language.Wasm.Structure as Wasm
 import WasmVerify.CFG.Fusion (simplifyCFG)
 import WasmVerify.CFG.Types
 
+#if MIN_VERSION_base(4,15,0)
+import Helpers.Numeric (naturalToInt)
+#elif MIN_VERSION_base(4,12,0)
+#else 
+import Helpers.Numeric (naturalToInt)
+#endif
+
 {- | Turns a WebAssembly function into its associated 'CFG',
  along with the initial node (starting point of the execution)
  and the final node (ending point of execution).
@@ -175,19 +182,6 @@ pushToLabelStack :: NodeLabel -> State LabelState [NodeLabel]
 pushToLabelStack label = modify (second (label :)) >> gets snd
 
 -- * Helper functions
-
--- 'naturalToInt' was only available in the base library
--- from version 4.12.0 up to 4.14.3, for some reason
--- unbeknownst to me. So this piece here defines the function
--- when the system's GHC base version is outside that range.
-#if MIN_VERSION_base(4,15,0)
-naturalToInt :: Natural -> Int
-naturalToInt = fromInteger . naturalToInteger
-#elif MIN_VERSION_base(4,12,0)
-#else 
-naturalToInt :: Natural -> Int
-naturalToInt = fromInteger . naturalToInteger
-#endif
 
 {- | Adds an index to each instruction of
  a list coming from a 'Wasm.Function' body.

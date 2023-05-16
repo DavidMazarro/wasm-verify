@@ -34,6 +34,14 @@ import WasmVerify.Monad
 import WasmVerify.Paths (allExecutionPaths, checkAssertsForSCC, getNodesAssertsMap, getTransitionAnnotation)
 import WasmVerify.ToSMT (exprToSMT)
 
+#if MIN_VERSION_base(4,15,0)
+import Helpers.Numeric
+#elif MIN_VERSION_base(4,12,0)
+import Helpers.Numeric (i32ToSignedInteger, i64ToSignedInteger)
+#else 
+import Helpers.Numeric
+#endif
+
 {- | Performs the symbolic execution of all functions in a WebAssembly module that
  have a matching specification ('FunctionSpec') in the VerifiWASM 'VerifiWASM.Program' provided,
  by calling 'executeFunction' on each one.
@@ -355,10 +363,10 @@ executeInstruction specModule (Wasm.TeeLocal index) = do
   void . pushToStack $ topValue
   executeInstruction specModule (Wasm.SetLocal index)
 executeInstruction _ (Wasm.I32Const n) = do
-  let stackValue = ValueConst $ toInteger n
+  let stackValue = ValueConst $ i32ToSignedInteger n
   void . pushToStack $ stackValue
 executeInstruction _ (Wasm.I64Const n) = do
-  let stackValue = ValueConst $ toInteger n
+  let stackValue = ValueConst $ i64ToSignedInteger n
   void . pushToStack $ stackValue
 executeInstruction _ (Wasm.IRelOp _ relOp) = do
   operationResult <- executeIRelOp relOp
@@ -635,20 +643,3 @@ indexToVar index = "var_" <> show index
 -}
 allLocalsInFunction :: FunctionSpec -> [TypedIdentifier]
 allLocalsInFunction funcSpec = nubOrd $ concatMap localVars $ (locals . specBody) funcSpec
-
--- 'naturalToInt' and 'intToNatural' were only available in the base library
--- from version 4.12.0 up to 4.14.3, for some reason
--- unbeknownst to me. So this piece here defines the function
--- when the system's GHC base version is outside that range.
-#if MIN_VERSION_base(4,15,0)
-naturalToInt :: Natural -> Int
-naturalToInt = fromInteger . naturalToInteger
-intToNatural :: Int -> Natural
-intToNatural = integerToNatural . toInteger
-#elif MIN_VERSION_base(4,12,0)
-#else 
-naturalToInt :: Natural -> Int
-naturalToInt = fromInteger . naturalToInteger
-intToNatural :: Int -> Natural
-intToNatural = integerToNatural . toInteger
-#endif

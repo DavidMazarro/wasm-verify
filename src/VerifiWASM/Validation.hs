@@ -93,6 +93,13 @@ import qualified Language.Wasm.Structure as Wasm hiding (Import (desc, name))
 import VerifiWASM.LangTypes
 import VerifiWASM.VerifiWASM
 
+#if MIN_VERSION_base(4,15,0)
+import Helpers.Numeric (naturalToInt)
+#elif MIN_VERSION_base(4,12,0)
+#else 
+import Helpers.Numeric (naturalToInt)
+#endif
+
 {- | A function that validates a complete VerifiWASM specification,
  throwing an exception within the 'VerifiWASM' monad when any
  of the checks aren't met. See the [Validation](#validation) section
@@ -880,16 +887,3 @@ argsIdentifiersCollissionsErr functionOrGhost argsOrLocals name collissions =
         <> argsOrLocals
         <> " or the functions/ghost functions"
         <> " to avoid name collissions."
-
--- 'naturalToInt' was only available in the base library
--- from version 4.12.0 up to 4.14.3, for some reason
--- unbeknownst to me. So this piece here defines the function
--- when the system's GHC base version is outside that range.
-#if MIN_VERSION_base(4,15,0)
-naturalToInt :: Natural -> Int
-naturalToInt = fromInteger . naturalToInteger
-#elif MIN_VERSION_base(4,12,0)
-#else 
-naturalToInt :: Natural -> Int
-naturalToInt = fromInteger . naturalToInteger
-#endif
