@@ -3,6 +3,12 @@
 module Helpers.Numeric where
 
 import Data.Word (Word32, Word64)
+#if MIN_VERSION_base(4,15,0)
+import GHC.Natural
+#elif MIN_VERSION_base(4,12,0)
+#else 
+import GHC.Natural
+#endif
 
 i32ToSignedInteger :: Word32 -> Integer
 i32ToSignedInteger n
