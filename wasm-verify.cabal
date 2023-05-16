@@ -31,6 +31,7 @@ library
   hs-source-dirs:   src
   exposed-modules:
     Helpers.ANSI
+    Helpers.Numeric
     VerifiWASM.LangTypes
     VerifiWASM.Parser
     VerifiWASM.Validation
