@@ -1,7 +1,7 @@
 (module
   (export "fib" (func $fib))
   (export "fib_iter" (func $fib_iter))
-  ;; Ghost definition of fib, using the canonical definition with recursion
+  ;; Definition of fib using the canonical definition with recursion
   (func $fib (param $n i32) (result i32)
     (if (i32.le_s (local.get $n) (i32.const 0))
       (return (i32.const 0))
