@@ -19,7 +19,7 @@ import Data.Containers.ListUtils (nubOrd)
 import Data.List (find, isPrefixOf, sort, stripPrefix)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Maybe (fromJust, fromMaybe, isJust, mapMaybe)
+import Data.Maybe (fromJust, fromMaybe, isJust, isNothing, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as Lazy
@@ -38,6 +38,8 @@ import WasmVerify.ToSMT (exprToSMT)
 import Helpers.Numeric
 #elif MIN_VERSION_base(4,12,0)
 import Helpers.Numeric (i32ToSignedInteger, i64ToSignedInteger)
+import Safe (atMay)
+import Helpers.ANSI (bold)
 #else 
 import Helpers.Numeric
 #endif
@@ -59,17 +61,43 @@ executeProgram program wasmModule = do
   modify (\state -> state{wasmFunctionIndicesBimap = wasmFunctionsBimap})
   foldM
     ( \smtMap funcSpec -> do
-        -- '(!!)' from lists is safe here by construction of the map of WASM functions,
-        -- and 'Map.!' is safe here because we have already validated that there exists
+        let moduleFunctions = (Wasm.functions . Wasm.getModule) wasmModule
+        -- 'Map.!' is safe here because we have already validated that there exists
         -- a WASM function for each of the specs in the VerifiWASM program (see 'Validation.validate')
-        let wasmFunction = (Wasm.functions . Wasm.getModule $ wasmModule) !! (wasmFunctionsBimap Bimap.! funcName funcSpec)
-        smtFunction <- executeFunction program (funcName funcSpec, wasmFunction)
+        let wasmFunctionIndex = wasmFunctionsBimap Bimap.! funcName funcSpec
+        let mWasmFunction = moduleFunctions `atMay` wasmFunctionIndex
+
+        when (isNothing mWasmFunction) $
+          possibleImportErr (funcName funcSpec) wasmFunctionIndex (length moduleFunctions)
+
+        -- The use of 'fromJust' here is safe because we have
+        -- just checked whether the value is 'Nothing' or not
+        -- (and in that case, we throw a custom failure)
+        smtFunction <- executeFunction program (funcName funcSpec, fromJust mWasmFunction)
         return $ Map.insert (funcName funcSpec) smtFunction smtMap
     )
     Map.empty
     $ functions program
   where
     wasmFunctionsBimap = getFunctionIndicesBimap $ Wasm.getModule wasmModule
+    possibleImportErr name funcIndex totalFunctions =
+      failWithError $
+        Failure $
+          "Trying to find the WebAssembly function "
+            <> (bold . T.pack) name
+            <> ", it couldn't be found or the index "
+            <> (bold . T.pack . show) funcIndex
+            <> "is out of bounds.\n"
+            <> "\nOut of "
+            <> (bold . T.pack . show) totalFunctions
+            <> " functions (indexed from "
+            <> (T.pack . show) (0 :: Int)
+            <> " to "
+            <> (T.pack . show) (totalFunctions - 1)
+            <> ") that are exported in the WebAssembly module."
+            <> "This most likely happened because you tried to verify"
+            <> " a WebAssembly module that imports external functions,"
+            <> " which is currently unsupported."
 
 {- | Performs the symbolic execution of a WebAssembly function, verifies it against
  its specification, and returns a list of SMT modules that correspond to the possible
@@ -123,7 +151,7 @@ executePath ::
   WasmVerify Lazy.Text
 executePath specModule spec nodesAssertsMap (cfg, initial, final) pathIndex path = do
   cleanSMT
-  -- TODO: What do we do with ghost function preconditions?
+
   addGhostFunctionsToSMT specModule
 
   appendToSMT $ "\n;;;;; " <> T.pack (funcName spec) <> "\n"
@@ -165,10 +193,9 @@ executePath specModule spec nodesAssertsMap (cfg, initial, final) pathIndex path
   postPath <- BNot <$> assertionPost varToExprMapWithReturns (last path)
   addAssertSMT $ exprToSMT postPath
 
-  -- Declare SMT variables for all functions
-  -- TODO: This reverse here is temporary. It should be unnecessary
-  -- to make the variables be declared in ascending order.
+  -- Declare SMT variables for all functions.
   varMap <- gets identifierMap
+  -- This reverse here is just to make the variables be declared in ascending order.
   forM_ (reverse $ Map.assocs varMap) declareAllVarVersions
 
   appendToSMT "(check-sat)"
@@ -267,13 +294,9 @@ executeNode :: VerifiWASM.Program -> Node -> WasmVerify ()
 executeNode specModule (Node (_, instructions)) =
   forM_ instructions (executeInstruction specModule . snd)
 
--- (TODO: Add thesis section here).
-
 {- | Performs the symbolic execution of a single 'Wasm.Instruction',
  materializing any changes that need to be applied to the state.
- This includes handling the symbolic execution stack. For more details
- on how the symbolic execution is performed for each expression, take a look
- at the implementation of this function or the relevant section in the thesis.
+ This includes handling the symbolic execution stack.
 -}
 executeInstruction :: VerifiWASM.Program -> Wasm.Instruction Natural -> WasmVerify ()
 -- For control instructions, the symbolic execution just skips over them

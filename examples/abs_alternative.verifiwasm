@@ -1,3 +1,3 @@
 spec abs(n : i32) returns (r : i32) {
-  ensures r == (if n > 0 then n else -n);
+  ensures r == (if n >= 0 then n else -n);
 }

@@ -136,7 +136,7 @@ getTransitionAnnotation cfg from to =
  every looping part of the WebAssembly program, this check is used to ensure
  that there's an assert in the specification for the provided strongly connected
  component of the 'CFG' in the case that it is a 'CyclicSCC' (representing a loop).
--} -- TODO: Use this function after calling getNodesAssertsMap in the main to check for asserts in SCCs
+-}
 checkAssertsForSCC :: VerifiWASM.FunctionSpec -> Map Node Assert -> SCC Node -> WasmVerify ()
 checkAssertsForSCC spec nodesAssertsMap scc =
   case scc of

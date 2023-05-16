@@ -90,15 +90,9 @@ import GHC.Natural
 import Helpers.ANSI (bold)
 import qualified Language.Wasm as Wasm
 import qualified Language.Wasm.Structure as Wasm hiding (Import (desc, name))
+import Safe (atMay)
 import VerifiWASM.LangTypes
 import VerifiWASM.VerifiWASM
-
-#if MIN_VERSION_base(4,15,0)
-import Helpers.Numeric (naturalToInt)
-#elif MIN_VERSION_base(4,12,0)
-#else 
-import Helpers.Numeric (naturalToInt)
-#endif
 
 {- | A function that validates a complete VerifiWASM specification,
  throwing an exception within the 'VerifiWASM' monad when any
@@ -107,9 +101,7 @@ import Helpers.Numeric (naturalToInt)
 -}
 validate :: Program -> Wasm.ValidModule -> VerifiWASM ()
 validate program wasmModule = do
-  -- TODO: Add check for multivalue functions,
-  -- or at least fail with unsupported.
-
+  wasmFunctions <- getWasmFunctions
   validateFunctionsExist program (map fst wasmFunctions)
 
   mapM_ (validateSpecArgReturnTypes wasmModule wasmFunctions) (functions program)
@@ -124,18 +116,39 @@ validate program wasmModule = do
   mapM_ (validateGhostFun program) (ghostFunctions program)
   mapM_ (validateFunction program) (functions program)
   where
-    wasmFunctions =
-      concatMap
-        ( \export -> case Wasm.desc export of
-            Wasm.ExportFunc index ->
-              [(Wasm.name export, (Wasm.functions . Wasm.getModule) wasmModule !! naturalToInt index)]
-            _ -> []
-        )
-        $ (Wasm.exports . Wasm.getModule) wasmModule
+    getWasmFunctions :: VerifiWASM [(Lazy.Text, Wasm.Function)]
+    getWasmFunctions =
+      concat
+        <$> mapM
+          ( \export -> case Wasm.desc export of
+              Wasm.ExportFunc index -> do
+                let moduleFunctions = (Wasm.functions . Wasm.getModule) wasmModule
+                let mFunction = moduleFunctions `atMay` naturalToInt index
+                when (isNothing mFunction) $ possibleImportErr index (length moduleFunctions)
+                return [(Wasm.name export, fromJust mFunction)]
+              _ -> return []
+          )
+          ((Wasm.exports . Wasm.getModule) wasmModule)
     ghostFunReturnTypes =
       M.fromList $
         map (\ghostFun -> (ghostName ghostFun, ghostReturnType ghostFun)) $
           ghostFunctions program
+    possibleImportErr funcIndex totalFunctions =
+      failWithError $
+        Failure $
+          "Trying to retrieve WebAssembly functions"
+            <> ", there was an index that went out of bounds: "
+            <> (bold . pack . show . naturalToInt) funcIndex
+            <> "\nOut of "
+            <> (bold . pack . show) totalFunctions
+            <> " functions (indexed from " 
+            <> (pack . show) (0 :: Int)
+            <> " to "
+            <> (pack . show) (totalFunctions - 1)
+            <> ") that are exported in the WebAssembly module."
+            <> "\nThis most likely happened because you tried to verify"
+            <> " a WebAssembly module that imports external functions,"
+            <> " which is currently unsupported."
 
 {- | Checks that the function specifications described in
  the VerifiWASM module actually exist within the WebAssembly
