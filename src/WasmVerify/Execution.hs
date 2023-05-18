@@ -24,8 +24,10 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as Lazy
 import GHC.Natural
+import Helpers.ANSI (bold)
 import qualified Language.Wasm as Wasm
 import qualified Language.Wasm.Structure as Wasm hiding (Import (desc, name))
+import Safe (atMay)
 import VerifiWASM.LangTypes
 import qualified VerifiWASM.LangTypes as VerifiWASM (FunctionSpec, Program)
 import WasmVerify.CFG (functionToCFG, stronglyConnCompCFG)
@@ -38,8 +40,6 @@ import WasmVerify.ToSMT (exprToSMT)
 import Helpers.Numeric
 #elif MIN_VERSION_base(4,12,0)
 import Helpers.Numeric (i32ToSignedInteger, i64ToSignedInteger)
-import Safe (atMay)
-import Helpers.ANSI (bold)
 #else 
 import Helpers.Numeric
 #endif

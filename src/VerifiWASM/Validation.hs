@@ -82,13 +82,20 @@ import Data.Maybe (fromJust, isNothing)
 import qualified Data.Set as Set
 import Data.Text (Text, pack)
 import qualified Data.Text.Lazy as Lazy
-import GHC.Natural
 import Helpers.ANSI (bold)
 import qualified Language.Wasm as Wasm
 import qualified Language.Wasm.Structure as Wasm hiding (Import (desc, name))
 import Safe (atMay)
 import VerifiWASM.LangTypes
 import VerifiWASM.VerifiWASM
+
+#if MIN_VERSION_base(4,15,0)
+import Helpers.Numeric (naturalToInt)
+#elif MIN_VERSION_base(4,12,0)
+import GHC.Natural
+#else 
+import Helpers.Numeric (naturalToInt)
+#endif
 
 {- | A function that validates a complete VerifiWASM specification,
  throwing an exception within the 'VerifiWASM' monad when any
@@ -137,7 +144,7 @@ validate program wasmModule = do
             <> (bold . pack . show . naturalToInt) funcIndex
             <> "\nOut of "
             <> (bold . pack . show) totalFunctions
-            <> " functions (indexed from " 
+            <> " functions (indexed from "
             <> (pack . show) (0 :: Int)
             <> " to "
             <> (pack . show) (totalFunctions - 1)
