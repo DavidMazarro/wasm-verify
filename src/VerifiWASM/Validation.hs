@@ -22,15 +22,12 @@
       - Functions must have different names, and must also have
       different names to any existing ghost functions.
       - The name of the arguments, local variables or return values in a function
-      specification must not collide with the name of an existing function or ghost function,
+      specification must not collide with the name of an existing function or ghost function.
       - There cannot be name duplicates among arguments, local variables or return values
       of a function specification.
-      - When declaring local variables, their name must not collide with the name
-      of an existing ghost function.
       - The instruction index in an 'Assert' must be greater or equal than 1,
       it cannot be 0. It also cannot be a negative number, but that check is performed
       during parsing of the VerifiWASM source code.
-      - TODO: review which other validations I'm doing
 
   - __Ghost functions__ are validated as follows:
 
@@ -41,7 +38,6 @@
       - There cannot be name duplicates among the arguments of a ghost function.
       - Variable identifiers appearing in the 'Termination' condition of a
       ghost function must be arguments of that ghost function.
-      - TODO: review which other validations I'm doing
 
  In addition, in the 'Requires' \/ 'Ensures' \/ 'Assert's of functions,
  or in the body of 'GhostFunction's, there are expressions ('Expr').

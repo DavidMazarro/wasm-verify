@@ -27,9 +27,9 @@ data FunctionSpec = FunctionSpec
   deriving (Show)
 
 {- | Ghost functions can be used in the verification process.
- They receive some arguments and return a value, by substituting the
- arguments in the expression body (constructed as an 'Expr') and evaluating
- that expression. In that sense, they are very similar to pure functions in functional programming,
+ They receive some arguments, substitute the arguments in the expression body
+ (constructed as an 'Expr') and return that expression.
+ In that sense, they are very similar to pure functions in functional programming,
  in contrast to WebAssembly functions which consist of a sequence of instructions.
 
  Ghost functions are helpful for abstracting expressions appearing in

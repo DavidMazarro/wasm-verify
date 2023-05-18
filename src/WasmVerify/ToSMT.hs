@@ -58,15 +58,18 @@ ghostFunctionsToSMT program =
     argWithType (identifier, _) =
       "(" <> T.pack identifier <> " " <> "Int" <> ")"
 
--- TODO: add Haddock
+-- | Transforms a VerifiWASM expression into an SMT command.
 exprToSMT :: Expr -> Text
 exprToSMT (FunCall name args) =
-  "("
-    <> T.pack name
-    <> " "
-    <> intercalate " " (map exprToSMT args)
-    -- <> foldr ((\x y -> x <> " " <> y) . exprToSMT) (T.pack name) args
-    <> ")"
+  if null args
+    then T.pack name
+    else
+      "("
+        <> T.pack name
+        <> " "
+        <> intercalate " " (map exprToSMT args)
+        -- <> foldr ((\x y -> x <> " " <> y) . exprToSMT) (T.pack name) args
+        <> ")"
 exprToSMT (IfThenElse condExpr ifExpr elseExpr) =
   "(ite "
     <> exprToSMT condExpr
