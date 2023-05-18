@@ -356,7 +356,7 @@ executeInstruction specModule (Wasm.Call index) = do
       appendToSMT $ "  \n; assume the postcondition of " <> T.pack name <> "\n"
       addAssertSMT $ exprToSMT postcondition
       appendToSMT "\n"
-    Nothing -> return () -- TODO. Throw an error when there's no spec for the called function?
+    Nothing -> return ()
 executeInstruction _ Wasm.Drop = void popFromStack
 executeInstruction _ Wasm.Select = do
   topValue3 <- popFromStack

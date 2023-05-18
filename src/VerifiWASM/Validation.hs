@@ -401,7 +401,7 @@ validateExpr (FunCall ghostFun args) = do
   when (ghostOrFuncSpec == FuncSpec) $ callFuncSpecErr scopeName ghostFun
 
   when (numArgs /= numGhostFunTypes) $ badNumOfArgsErr scopeName numArgs numGhostFunTypes
-  when (any (/= ExprInt) argTypes) $ notAllIntegerArgsErr scopeName -- TODO: Mention the removal of this check in the issue about ghost function boolean arguments
+  when (any (/= ExprInt) argTypes) $ notAllIntegerArgsErr scopeName
   let mReturnType = M.lookup ghostFun ghostFunReturnTypes
   when (isNothing mReturnType) $ notFoundGhostFunErr ghostFun
   -- The use of 'fromJust' here is safe because we have

@@ -40,7 +40,16 @@ verifyModule program wasmModule = do
           <> (T.pack . show) (length verificationResults)
           <> " functions, there were "
           <> (T.pack . show) (length $ filter (== False) verificationResults)
-          <> " that didn't match their specification."
+          <> " that didn't match their specification.\n"
+          <> "These are some possible causes:\n"
+          <> "  - The specification is correct and complete: this means the function"
+          <> " is incorrect, and should be fixed.\n"
+          <> "  - The specification is complete but incorrect: the function could be"
+          <> " correct,\n    but it didn't match the specification because the specification"
+          <> " is wrong, and should be fixed.\n"
+          <> "  - The specification is incomplete: maybe you are calling a WebAssembly"
+          <> " function that doesn't have a spec,\n    or maybe you are using a recursive"
+          <> " ghost function that doesn't terminate in some part in the spec."
     else
       T.putStrLn $
         "Verification successful! All "
