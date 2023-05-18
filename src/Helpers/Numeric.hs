@@ -28,11 +28,11 @@ i64ToSignedInteger n
 naturalToInt :: Natural -> Int
 naturalToInt = fromInteger . naturalToInteger
 intToNatural :: Int -> Natural
-intToNatural = integerToNatural . toInteger
+intToNatural = naturalFromInteger . toInteger
 #elif MIN_VERSION_base(4,12,0)
 #else 
 naturalToInt :: Natural -> Int
 naturalToInt = fromInteger . naturalToInteger
 intToNatural :: Int -> Natural
-intToNatural = integerToNatural . toInteger
+intToNatural = naturalFromInteger . toInteger
 #endif
