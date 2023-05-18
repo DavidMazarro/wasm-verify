@@ -13,6 +13,8 @@ import GHC.IO.Exception (ExitCode (ExitSuccess))
 -- import           GHC.IO.Exception
 import qualified Data.Text.IO as T
 import Helpers.ANSI (colorInRed)
+import qualified Language.Wasm as Wasm
+import qualified Language.Wasm.Structure as Wasm
 import Options.Applicative
 import Options.Applicative.Extra (helperWith)
 import Path
@@ -20,10 +22,11 @@ import Paths_wasm_verify (version)
 import System.Directory (makeAbsolute)
 import System.Process (readProcessWithExitCode)
 import Text.Pretty.Simple (pPrint)
-import VerifiWASM.ASTValidator (validate)
 import VerifiWASM.Parser (parseVerifiWASMFile)
+import VerifiWASM.Validation (validate)
 import VerifiWASM.VerifiWASM (runVerifiWASM)
 import WasmVerify
+import WasmVerify.CFG (functionToCFG)
 import WasmVerify.Execution (executeProgram)
 import WasmVerify.Monad (runWasmVerify)
 import WasmVerify.ToSMT (ghostFunctionsToSMT)
@@ -35,7 +38,8 @@ data Options = Options
     spec :: FilePath,
     debugWasmADT :: Bool,
     debugSpecADT :: Bool,
-    debugSMT :: Bool
+    debugSMT :: Bool,
+    debugCFG :: Bool
   }
 
 parserInfo :: ParserInfo Options
@@ -79,6 +83,11 @@ parserInfo =
               <> help
                 "Outputs the SMT modules, resulting from the symbolic execution, that verify the WebAssembly module."
           )
+        <*> switch
+          ( long "debug-cfg"
+              <> help
+                "Outputs the CFGs generated from the functions in the WebAssembly module."
+          )
 
 ----------------------------------------------------------------------------
 -- Main
@@ -109,6 +118,7 @@ main = do
           runVerifiWASM $ validate program wasmModule
           when debugSpecADT $ pPrint program
           when debugSpecADT $ pPrint $ ghostFunctionsToSMT program
+          when debugCFG $ mapM_ (pPrint . functionToCFG) (Wasm.functions $ Wasm.getModule wasmModule)
           when debugSMT $ pPrint =<< runWasmVerify (executeProgram program wasmModule)
           verifyModule program wasmModule
         Nothing -> return ()
