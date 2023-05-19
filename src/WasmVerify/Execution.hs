@@ -557,10 +557,10 @@ pushToStack value = do
 popFromStack :: WasmVerify StackValue
 popFromStack = do
   state <- get
-  let (topValue : restOfStack) = symbolicStack state
-  let newState = state{symbolicStack = restOfStack}
+  let stack = symbolicStack state
+  let newState = state{symbolicStack = tail stack}
   put newState
-  return topValue
+  return $ head stack
 
 {- | Replaces the variables found in an expression with the
  versioned variable version, corresponding to the latest version
