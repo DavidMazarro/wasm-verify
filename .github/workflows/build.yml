@@ -21,7 +21,7 @@ jobs:
           # - macos-latest
           - ubuntu-latest
         ghc:
-          - "9.6.1"
+          - "9.2.6"
           - "8.10.7"
 
     steps:
