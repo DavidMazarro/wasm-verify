@@ -17,3 +17,8 @@ If you'd rather not have it in your path, you can build and execute the program 
 cabal exec -- wasm-verify <the flags you want to use>
 ```
 If for some reason Cabal isn't working for you, try doing a `cabal update` first, or just try with Stack (simply replace `cabal` in the previous command with `stack`).
+
+## GHC versions
+The project is tested to build for GHC versions 8.10.7 (latest GHC 8) and 9.6.1.
+
+The project is most likely incompatible with GHC versions older than 8.2.1 because we make use of [naturalFromInteger](https://hackage.haskell.org/package/base-4.18.0.0/docs/GHC-Natural.html#v:naturalFromInteger) which was added in `base-4.10.0.0`.
