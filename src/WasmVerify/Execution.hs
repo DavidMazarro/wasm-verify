@@ -313,6 +313,7 @@ executeInstruction _ (Wasm.Loop _ _) = return ()
 executeInstruction _ (Wasm.If _ _ _) = return ()
 executeInstruction _ (Wasm.Br _) = return ()
 executeInstruction _ (Wasm.BrIf _) = return ()
+executeInstruction _ (Wasm.BrTable _ _) = return ()
 executeInstruction _ Wasm.Return = return ()
 -- When you check the spec of a function, you assume the precondition and
 -- check the postcondition. When you call a function it's the opposite:

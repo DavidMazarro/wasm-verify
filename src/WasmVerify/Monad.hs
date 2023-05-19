@@ -137,7 +137,14 @@ addAnnotationToSMT annotation = do
     Empty -> return ()
     Eq n -> (addAssertSMT . exprToSMT) $ BEq (stackValueToExpr topValue) (IInt $ toInteger n)
     NotEq n -> (addAssertSMT . exprToSMT) $ BDistinct (stackValueToExpr topValue) (IInt $ toInteger n)
-    GreaterEq n -> (addAssertSMT . exprToSMT) $ BGreaterOrEq (stackValueToExpr topValue) (IInt $ toInteger n)
+    GreaterEq n ->
+      (addAssertSMT . exprToSMT) $
+        BOr
+          ( BGreaterOrEq
+              (stackValueToExpr topValue)
+              (IInt $ toInteger n)
+          )
+          (BLess (stackValueToExpr topValue) (IInt 0))
 
 {- | Prepends constant declarations corresponding to the versioned
  variables provided to the SMT accumulator in the 'WasmVerify' monad.
