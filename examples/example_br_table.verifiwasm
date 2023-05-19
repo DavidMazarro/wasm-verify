@@ -1,0 +1,8 @@
+spec example_br_table(n : i32) returns (r : i32) {
+  ensures if n == 0 then
+            r == 10
+          else if n == 1 then
+            r == 20
+          else
+            r == 30;
+}
