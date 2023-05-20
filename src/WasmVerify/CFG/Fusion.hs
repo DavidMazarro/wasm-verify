@@ -19,22 +19,22 @@ simplifyCFG cfg =
         else simplifyCFG simplifiedCFG
 
 {- | Performs a simplification step for the provided 'CFG',
- i.e. if there's a pair of nodes that can be fusioned,
+ i.e. if there's a pair of nodes that can be fused,
  it returns the resulting 'CFG' of applying that fusion step.
 -}
 simplifyStepCFG ::
   (CFG, NodeLabel, NodeLabel) ->
   (CFG, NodeLabel, NodeLabel)
 simplifyStepCFG cfgInitialFinal =
-  maybe cfgInitialFinal (fusionNodesInCFG cfgInitialFinal) $
+  maybe cfgInitialFinal (fuseNodesInCFG cfgInitialFinal) $
     fusionableNodes cfgInitialFinal
 
 -- | Performs the fusion of a pair of fusionable nodes in a 'CFG'.
-fusionNodesInCFG ::
+fuseNodesInCFG ::
   (CFG, NodeLabel, NodeLabel) ->
   (Node, Node) ->
   (CFG, NodeLabel, NodeLabel)
-fusionNodesInCFG cfgInitialFinal (node1, node2) =
+fuseNodesInCFG cfgInitialFinal (node1, node2) =
   (CFG (nodes, edges), initialLabel, finalLabel)
   where
     (cfg@(CFG (prevNodes, prevEdges)), initialLabel, prevFinal) = cfgInitialFinal
@@ -67,7 +67,7 @@ fusionableNodes (cfg@(CFG (nodes, _)), initialLabel, _) =
   (find . uncurry) (areFusionableInCFG cfg initialLabel) $
     nodes `Set.cartesianProduct` nodes
 
-{- | Returns 'True' if a pair of nodes can be fusioned
+{- | Returns 'True' if a pair of nodes can be fused
  in a 'CFG' (with an initial label), and 'False' otherwise.
 -}
 areFusionableInCFG :: CFG -> NodeLabel -> Node -> Node -> Bool
