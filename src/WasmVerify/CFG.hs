@@ -107,7 +107,7 @@ toCFG [loopInstr@(indexInstr, Wasm.Loop _ loopBody)] = do
 toCFG [ifInstr@(indexInstr, Wasm.If _ ifBody elseBody)] = do
   newLabel <- freshLabel
   (ifCFG, ifInitial, ifFinals) <- toCFG $ indexInstructions (indexInstr + 1) ifBody
-  (elseCFG, elseInitial, elseFinals) <- toCFG $ indexInstructions (indexInstr + 1) elseBody
+  (elseCFG, elseInitial, elseFinals) <- toCFG $ indexInstructions (deepLength ifBody + indexInstr + 1) elseBody
   let nodes = Node (newLabel, [ifInstr]) `Set.insert` nodeSet elseCFG `Set.union` nodeSet ifCFG
   let edges = edgeUnion (edgeSet ifCFG) (edgeSet elseCFG) ifInitial elseInitial newLabel
   return (CFG (nodes, edges), newLabel, ifFinals `Set.union` elseFinals)
@@ -209,7 +209,7 @@ addInstructionIndex blockInstr@(Wasm.Block _ blockBody) index =
 addInstructionIndex loopInstr@(Wasm.Loop _ loopBody) index =
   (index + 1 + deepLength loopBody, (index, loopInstr))
 addInstructionIndex blockInstr@(Wasm.If _ ifBody elseBody) index =
-  (index + 1 + deepLength ifBody + length elseBody, (index, blockInstr))
+  (index + 1 + deepLength ifBody + deepLength elseBody, (index, blockInstr))
 addInstructionIndex instruction index = (index + 1, (index, instruction))
 
 -- Used to calculate the true number of instructions
