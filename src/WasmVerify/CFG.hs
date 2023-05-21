@@ -25,7 +25,7 @@ import Helpers.Numeric (naturalToInt)
  and the final node (ending point of execution).
 -}
 functionToCFG :: Wasm.Function -> (CFG, NodeLabel, NodeLabel)
-functionToCFG function = evalState (simplifyCFG <$> toCFGFunction function) (0, [])
+functionToCFG function = evalState (simplifyCFG <$> cfgFromFunction function) (0, [])
 
 {- | Returns the list of strongly connected components in a
  function's 'CFG'. Used for generating verification conditions.
@@ -48,10 +48,10 @@ stronglyConnCompCFG cfg =
  See 'toCFG' for the main logic. After this, there's just a single
  final node in the CFG.
 -}
-toCFGFunction ::
+cfgFromFunction ::
   Wasm.Function ->
   State LabelState (CFG, NodeLabel, NodeLabel)
-toCFGFunction (Wasm.Function _ _ functionBody) = do
+cfgFromFunction (Wasm.Function _ _ functionBody) = do
   newLabel <- freshLabel
   void $ pushToLabelStack newLabel
   (bodyCFG, bodyInitial, bodyFinals) <- toCFG $ indexInstructions 1 functionBody
