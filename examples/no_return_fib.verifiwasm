@@ -1,0 +1,17 @@
+ghostdef ghost_fib(n : i32) returns integer {
+  requires n > 0;
+  decreases n;
+  if n < 1 then
+    0 
+  else if n < 3 then
+    1
+  else
+    ghost_fib(n - 1) + ghost_fib(n - 2)
+}
+
+spec no_return_fib(n : i32) returns () {
+  requires n >= 0;
+  local x : i32, y : i32, i : i32;
+  assert before 8: 0 <= i && i <= n &&
+                   x == ghost_fib(i) && y == ghost_fib(i+1);
+}
