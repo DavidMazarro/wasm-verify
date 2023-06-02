@@ -10,6 +10,7 @@ import Data.ByteString.Builder (Builder, toLazyByteString)
 import qualified Data.ByteString.Lazy as BS (putStr)
 import Data.Map (Map)
 import qualified Data.Map as M
+import qualified Data.Map as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8Builder)
@@ -103,6 +104,9 @@ stackValueToExpr (ValueConst n) = IInt n
 -}
 cleanSMT :: WasmVerify ()
 cleanSMT = modify (\state -> state{smtText = ""})
+
+cleanIdentifierMap :: WasmVerify ()
+cleanIdentifierMap = modify (\state -> state{identifierMap = Map.empty})
 
 {- | Prepends a piece of SMT code to the SMT accumulator in the
  'WasmVerify' monad. This function assumes that the code provided

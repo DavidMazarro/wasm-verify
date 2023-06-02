@@ -151,6 +151,7 @@ executePath ::
   WasmVerify Lazy.Text
 executePath specModule spec nodesAssertsMap (cfg, initial, final) pathIndex path = do
   cleanSMT
+  cleanIdentifierMap 
 
   addGhostFunctionsToSMT specModule
 
@@ -158,12 +159,12 @@ executePath specModule spec nodesAssertsMap (cfg, initial, final) pathIndex path
 
   appendToSMT $ "\n;;; path " <> T.pack (show pathIndex) <> "\n"
 
+  initializeIdentifierMap spec
   -- If the path starts from the initial node, we need to initialize
   -- the local variables to their default values.
-  when (head path == initial) $ initializeIdentifierMap spec
-
-  let numOfArgs = length $ funcArgs spec
-  initializeLocalsSMT [numOfArgs .. numOfArgs + length (allLocalsInFunction spec) - 1]
+  when (head path == initial) $ do 
+    let numOfArgs = length $ funcArgs spec
+    initializeLocalsSMT [numOfArgs .. numOfArgs + length (allLocalsInFunction spec) - 1]
 
   -- PRECONDITION
   -- Add precondition (requires or assert depending on the first node in the path) to SMT
