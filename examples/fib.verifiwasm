@@ -10,6 +10,7 @@ ghostdef ghost_fib(n : i32) returns integer {
 }
 
 spec fib(n : i32) returns (r : i32) {
+  requires n >= 0;
   ensures r == ghost_fib(n);
 }
 
