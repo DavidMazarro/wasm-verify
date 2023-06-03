@@ -151,7 +151,7 @@ executePath ::
   WasmVerify Lazy.Text
 executePath specModule spec nodesAssertsMap (cfg, initial, final) pathIndex path = do
   cleanSMT
-  cleanIdentifierMap 
+  cleanIdentifierMap
 
   addGhostFunctionsToSMT specModule
 
@@ -162,7 +162,7 @@ executePath specModule spec nodesAssertsMap (cfg, initial, final) pathIndex path
   initializeIdentifierMap spec
   -- If the path starts from the initial node, we need to initialize
   -- the local variables to their default values.
-  when (head path == initial) $ do 
+  when (head path == initial) $ do
     let numOfArgs = length $ funcArgs spec
     initializeLocalsSMT [numOfArgs .. numOfArgs + length (allLocalsInFunction spec) - 1]
 
@@ -403,6 +403,8 @@ executeInstruction _ (Wasm.IBinOp _ binOp) = do
   (resultVar, version) <- newResultVar
   addAssertSMT =<< varEqualsExpr (resultVar, version) operationResult
   void . pushToStack $ ValueVar $ versionedVarToIdentifier (resultVar, version)
+executeInstruction _ Wasm.I32Eqz = executeEqZ
+executeInstruction _ Wasm.I64Eqz = executeEqZ
 executeInstruction _ instruction =
   failWithError $
     Failure $
@@ -477,6 +479,20 @@ executeIRelOp binOp = do
           "Unsupported WebAssembly integer comparison operation: "
             <> (T.pack . show)
               binOp
+
+executeEqZ :: WasmVerify ()
+executeEqZ = do
+  topValue <- popFromStack
+  (resultVar, version) <- newResultVar
+  addAssertSMT
+    =<< varEqualsExpr
+      (resultVar, version)
+      ( IfThenElse
+          (BEq (stackValueToExpr topValue) (IInt 0))
+          (IInt 1)
+          (IInt 0)
+      )
+  void . pushToStack $ ValueVar $ versionedVarToIdentifier (resultVar, version)
 
 {- | Returns a 'Bimap' with the names of the functions in the WebAssembly
  module and their corresponding indices in the list of 'Wasm.functions'.
