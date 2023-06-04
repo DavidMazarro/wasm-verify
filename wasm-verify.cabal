@@ -4,12 +4,12 @@ version:            0.1.0.0
 
 -- synopsis:
 -- description:
-homepage:           https://github.com/DavidMazarro/wasm-verify#readme
-license:            BSD-3-Clause
+homepage:           https://github.com/DavidMazarro/wasm-verify
+license:            MPL-2.0
 license-file:       LICENSE
 author:             David Mazarro
 maintainer:         davidmazarro98@gmail.com
-copyright:          2022 Author name here
+copyright:          2022 David Mazarro
 category:           Web
 build-type:         Simple
 extra-source-files:
