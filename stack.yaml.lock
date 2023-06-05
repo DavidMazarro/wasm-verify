@@ -3,7 +3,14 @@
 # For more information, please see the documentation at:
 #   https://docs.haskellstack.org/en/stable/lock_files
 
-packages: []
+packages:
+- completed:
+    hackage: wasm-1.1.1@sha256:cea1e6c43d1ee46392eabb6b0f4fc469b6d8b987bcfbdd4694f9c48be346f229,2432
+    pantry-tree:
+      sha256: 87029a77cf92dc8ba2b3b20d61563b44b87a4f10c8a3227ff31a2ff2e534cc19
+      size: 896
+  original:
+    hackage: wasm-1.1.1
 snapshots:
 - completed:
     sha256: 428ec8d5ce932190d3cbe266b9eb3c175cd81e984babf876b64019e2cbe4ea68
