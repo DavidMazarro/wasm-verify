@@ -72,15 +72,15 @@ executable wasm-verify
   default-language: Haskell2010
   other-modules:    Paths_wasm_verify
   build-depends:
-    , base                  >=4.7 && <5
+    , base                  >=4.7   && <5
     , directory
     , optparse-applicative
     , path
     , pretty-simple
     , process
     , text
+    , wasm                  ==1.1.1
     , wasm-verify
-    , wasm
 
   ghc-options:
     -Wall -Werror -Wcompat -Widentities -Wincomplete-record-updates
