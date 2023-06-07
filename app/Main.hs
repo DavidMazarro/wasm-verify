@@ -47,9 +47,9 @@ parserInfo =
   info
     (helpParser <*> versionParser <*> optsParser)
     ( fullDesc
-        <> progDesc "A proof-of-concept formal verification tool for WASM."
+        <> progDesc "A proof-of-concept formal verification tool for WebAssembly."
         <> header
-          "wasm-verify - A proof-of-concept formal verification tool for WASM."
+          "wasm-verify - A proof-of-concept formal verification tool for WebAssembly."
     )
   where
     helpParser :: Parser (a -> a)
