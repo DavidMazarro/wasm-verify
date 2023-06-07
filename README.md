@@ -8,6 +8,9 @@ A proof-of-concept formal verification tool for WASM.
 To build the program from the source code, you need to have GHC (the Haskell compiler) and Cabal
 installed in your system. The current best way to do so is via [GHCup](https://www.haskell.org/ghcup/).
 
+You also need to have the SMT solver [Z3](https://github.com/z3prover/z3) installed in your system
+and included in your PATH, since `wasm-verify` relies on it for the verification process.
+
 From within the project's root folder you can run the following command to build the project and automatically add the executable to your path:
 ```
 cabal install
