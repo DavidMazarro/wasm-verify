@@ -28,13 +28,13 @@ verifyModule ::
   VerifiWASM.Program ->
   -- | The WebAssembly module containing the functions to be verified.
   Wasm.ValidModule ->
-  IO ()
+  IO Bool
 verifyModule program wasmModule = do
   smtFunctionsMap <- runWasmVerify $ executeProgram program wasmModule
   verificationResults <- forM (Map.assocs smtFunctionsMap) verifyFunction
   T.putStrLn "──────────────────────────────────────"
-  if any (== False) verificationResults
-    then
+  if False `elem` verificationResults
+    then do
       T.putStrLn $
         "Verification failed! Of all "
           <> (T.pack . show) (length verificationResults)
@@ -50,11 +50,13 @@ verifyModule program wasmModule = do
           <> "  - The specification is incomplete: maybe you are calling a WebAssembly"
           <> " function that doesn't have a spec,\n    or maybe you are using a recursive"
           <> " ghost function that doesn't terminate in some part in the spec."
-    else
+      return False
+    else do
       T.putStrLn $
         "Verification successful! All "
           <> (T.pack . show) (length verificationResults)
           <> " functions match their specifications."
+      return True
 
 {- | Performs the verification of the provided WebAssembly function.
  The argument is a pair with the name of the WebAssembly function and the
@@ -64,7 +66,7 @@ verifyModule program wasmModule = do
 verifyFunction :: (Identifier, [Lazy.Text]) -> IO Bool
 verifyFunction (funcName, pathsSMT) = do
   resultsSMT <- forM pathsSMT runZ3
-  if any (== "sat") $ concat resultsSMT
+  if elem "sat" $ concat resultsSMT
     then do
       T.putStrLn . failureText $ T.pack funcName <> " does not match its specification."
       return False

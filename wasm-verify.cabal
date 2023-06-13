@@ -92,7 +92,7 @@ test-suite test
   type:               exitcode-stdio-1.0
   hs-source-dirs:     test
   main-is:            Spec.hs
-  other-modules:      WasmVerify.ModuleLoaderSpec
+  other-modules:      WasmVerify.WasmVerifySpec
   build-depends:
     , base
     , bytestring
@@ -100,6 +100,7 @@ test-suite test
     , hspec
     , megaparsec
     , path
+    , silently
     , wasm
     , wasm-verify
 
