@@ -32,6 +32,10 @@ jobs:
         with:
           ghc-version: ${{ matrix.ghc }}
           cabal-version: "3.6"
+      - name: Install Z3
+        uses: pavpanchekha/setup-z3@1.2.2
+        with:
+          version: "4.12.2"
       - name: Configure project
         run: cabal configure --enable-tests
       - name: Build project
