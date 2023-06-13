@@ -6,7 +6,7 @@ import Control.Exception (
   ErrorCall (ErrorCall),
   throwIO,
  )
-import Control.Monad (when)
+import Control.Monad (void, when)
 import Data.Version (showVersion)
 import GHC.IO.Exception (ExitCode (ExitSuccess))
 
@@ -120,7 +120,7 @@ main = do
           when debugSpecADT $ pPrint $ ghostFunctionsToSMT program
           when debugCFG $ mapM_ (pPrint . functionToCFG) (Wasm.functions $ Wasm.getModule wasmModule)
           when debugSMT $ pPrint =<< runWasmVerify (executeProgram program wasmModule)
-          verifyModule program wasmModule
+          void $ verifyModule program wasmModule
         Nothing -> return ()
     _ -> do
       fail "The specification file extension must be .verifiwasm"
