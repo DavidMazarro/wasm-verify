@@ -1,3 +1,7 @@
 spec abs(n : i32) returns (r : i32) {
   ensures r == |n|;
 }
+
+spec abs_s_exp(n : i32) returns (r : i32) {
+  ensures r == |n|;
+}
