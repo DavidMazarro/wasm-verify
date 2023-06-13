@@ -1,0 +1,7 @@
+spec cfg_example(n : i32) returns (r : i32) {
+  /* 
+    This example is shown in Chapter 5 (CFGs) of the thesis
+    to illustrate the concept of a CFG.
+  */
+  ensures if n - 5 >= 0 then r == 2*n + 1 else r == 3*n + 1;
+}
