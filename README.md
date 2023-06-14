@@ -1,11 +1,22 @@
-# `wasm-verify`: a verification tool for WebAssembly programs
+<div align="center">
 
-[![Build](https://github.com/DavidMazarro/wasm-verify/actions/workflows/build.yml/badge.svg)](https://github.com/DavidMazarro/wasm-verify/actions/workflows/build.yml)
+  <h1><code>wasm-verify</code></h1>
 
-A proof-of-concept formal verification tool for WebAssembly. Based on the researched performed during
-the development of my master's thesis "*Specification and verification of WebAssembly programs*".
+  <p>
+    <strong>A proof-of-concept formal verification tool for WebAssembly. Based on the researched performed during
+the development of my master's thesis "<i>Specification and verification of WebAssembly programs</i>".</strong>
+  </p>
 
+  <p>
+    <a href="https://github.com/DavidMazarro/wasm-verify/actions/workflows/build.yml"><img src="https://github.com/DavidMazarro/wasm-verify/actions/workflows/build.yml/badge.svg" alt="Build Status" /></a>
+  </p>
+
+</div>
+
+________________________
 To learn how to write specifications in **VerifiWASM**, the specification language supported in `wasm-verify`, you can take a look at some of the [examples](examples/) in this repo, or read Chapter 4 - "*VerifiWASM: the specification language*" in the thesis.
+
+The verification results provided by `wasm-verify` are of **partial correctness**. That is: **assuming** the given function terminates, **then** it is correct. To achieve **total correctness**, you would also need to have some sort of termination proof for the function provided, which is not currently supported by `wasm-verify`.
 
 # Installation
 
