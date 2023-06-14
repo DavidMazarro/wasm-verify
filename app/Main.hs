@@ -101,29 +101,28 @@ main = do
   specFileExt <- fileExtension specFilepath
 
   case fileExt of
-    ".smt2" -> do
-      runZ3WithFile filepath
     ".wasm" -> do
-      wasmModule <- loadModuleFromFile filepath
-      when debugWasmADT $ pPrint wasmModule
-    _ -> do
-      fail "The file extension must be .wasm or .smt2"
+      case specFileExt of
+        ".verifiwasm" -> do
+          wasmModule <- loadModuleFromFile filepath
+          when debugWasmADT $ pPrint wasmModule
 
-  case specFileExt of
-    ".verifiwasm" -> do
-      wasmModule <- loadModuleFromFile filepath
-      mProgram <- parseVerifiWASMFile specFilepath
-      case mProgram of
-        (Just program) -> do
-          runVerifiWASM $ validate program wasmModule
-          when debugSpecADT $ pPrint program
-          when debugSpecADT $ pPrint $ ghostFunctionsToSMT program
-          when debugCFG $ mapM_ (pPrint . functionToCFG) (Wasm.functions $ Wasm.getModule wasmModule)
-          when debugSMT $ pPrint =<< runWasmVerify (executeProgram program wasmModule)
-          void $ verifyModule program wasmModule
-        Nothing -> return ()
+          mProgram <- parseVerifiWASMFile specFilepath
+          case mProgram of
+            (Just program) -> do
+              runVerifiWASM $ validate program wasmModule
+              when debugSpecADT $ pPrint program
+              when debugSpecADT $ pPrint $ ghostFunctionsToSMT program
+              when debugCFG $ mapM_ (pPrint . functionToCFG) (Wasm.functions $ Wasm.getModule wasmModule)
+              when debugSMT $ pPrint =<< runWasmVerify (executeProgram program wasmModule)
+              void $ verifyModule program wasmModule
+            -- No error logging in the 'Nothing' case since 'parseVerifiWASMFile'
+            -- runs the VerifiWASM monad which already performs error logging.
+            Nothing -> return ()
+        _ -> do
+          fail "The specification file extension must be .verifiwasm"
     _ -> do
-      fail "The specification file extension must be .verifiwasm"
+      fail "The WebAssembly module file extension must be .wasm"
 
 {- | Runs the Z3 solver with the contents of the provided SMTLIB2 file
  and outputs the results in the console.
