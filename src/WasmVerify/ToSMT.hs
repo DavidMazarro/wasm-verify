@@ -11,7 +11,6 @@ import qualified Data.Text as T
 import Safe (findJust)
 import VerifiWASM.LangTypes
 
--- TODO: add Haddock
 ghostFunctionsToSMT :: Program -> Text
 ghostFunctionsToSMT program =
   let ghostFunDecls = map recursionSetToSMT $ recursionSets program
@@ -101,7 +100,6 @@ exprToSMT (IDiv leftExpr rightExpr) = binaryToSMT "div" leftExpr rightExpr
 exprToSMT (IMod leftExpr rightExpr) = binaryToSMT "mod" leftExpr rightExpr
 exprToSMT (IAbs expr) = unaryToSMT "abs" expr
 
--- TODO: add Haddock
 exprTypeToSMT :: ExprType -> Text
 exprTypeToSMT ExprBool = "Bool"
 exprTypeToSMT ExprInt = "Int"
@@ -137,12 +135,10 @@ recursionSets = stronglyConnComp . funDepGraph
 
 -- * Helper functions
 
--- TODO: add Haddock
 unaryToSMT :: Text -> Expr -> Text
 unaryToSMT operator expr =
   "(" <> operator <> " " <> exprToSMT expr <> ")"
 
--- TODO: add Haddock
 binaryToSMT :: Text -> Expr -> Expr -> Text
 binaryToSMT operator leftExpr rightExpr =
   "(" <> operator <> " " <> exprToSMT leftExpr <> " " <> exprToSMT rightExpr <> ")"

@@ -20,7 +20,6 @@ import VerifiWASM.LangTypes (Expr (..), IdVersion, Identifier, Program, Versione
 import WasmVerify.CFG.Types (Annotation (..), NodeLabel)
 import WasmVerify.ToSMT (exprToSMT, ghostFunctionsToSMT)
 
--- TODO: add Haddock
 type WasmVerify a = ExceptT Failure (StateT ExecState (Writer Builder)) a
 
 {- | The type that functions as a state when performing the symbolic

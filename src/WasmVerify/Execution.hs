@@ -6,8 +6,6 @@
 
 {- |
  = Symbolic execution and SMT code generation
-
- TODO: Add description
 -}
 module WasmVerify.Execution where
 

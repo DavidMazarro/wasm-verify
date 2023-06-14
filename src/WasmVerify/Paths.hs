@@ -4,8 +4,6 @@
 
 {- |
  = Execution path search and related functionality
-
- TODO: Describe module
 -}
 module WasmVerify.Paths where
 
