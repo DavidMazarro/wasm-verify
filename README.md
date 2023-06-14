@@ -16,6 +16,8 @@ the development of my master's thesis "<i>Specification and verification of WebA
 ________________________
 To learn how to write specifications in **VerifiWASM**, the specification language supported in `wasm-verify`, you can take a look at some of the [examples](examples/) in this repo, or read Chapter 4 - "*VerifiWASM: the specification language*" in the thesis.
 
+The verification results provided by `wasm-verify` are of **partial correctness**. That is: **assuming** the given function terminates, **then** it is correct. To achieve **total correctness**, you would also need to have some sort of termination proof for the function provided, which is not currently supported by `wasm-verify`.
+
 # Installation
 
 The release of `wasm-verify` does not currently ship with binary releases, so the only installation method is building from source.
