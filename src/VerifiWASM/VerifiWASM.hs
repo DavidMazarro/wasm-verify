@@ -13,6 +13,7 @@ import qualified Data.Map as M
 import Data.Text (Text)
 import Data.Text.Encoding (encodeUtf8Builder)
 import Helpers.ANSI (colorInRed)
+import System.Exit (exitFailure)
 import VerifiWASM.LangTypes
 
 {- | The base monad used for all actions and checks performed
@@ -60,7 +61,7 @@ runVerifiWASM action = do
   BS.putStr $ toLazyByteString logs
   case res of
     Right x -> pure x
-    Left err -> error $ show $ unFailure err
+    Left _ -> exitFailure
   where
     emptyContextState = ContextState M.empty ("", M.empty) M.empty
 

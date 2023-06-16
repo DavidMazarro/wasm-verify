@@ -16,6 +16,7 @@ import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8Builder)
 import qualified Data.Text.Lazy as Lazy
 import Helpers.ANSI (colorInRed)
+import System.Exit (exitFailure)
 import VerifiWASM.LangTypes (Expr (..), IdVersion, Identifier, Program, VersionedVar)
 import WasmVerify.CFG.Types (Annotation (..), NodeLabel)
 import WasmVerify.ToSMT (exprToSMT, ghostFunctionsToSMT)
@@ -65,7 +66,7 @@ runWasmVerify action = do
   BS.putStr $ toLazyByteString logs
   case res of
     Right x -> pure x
-    Left err -> error $ show $ unFailure err
+    Left _ -> exitFailure
   where
     emptyContextState = ExecState M.empty [] (0, Nothing) Bimap.empty ""
 
