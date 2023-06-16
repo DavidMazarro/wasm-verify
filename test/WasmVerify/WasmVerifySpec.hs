@@ -8,14 +8,12 @@ import qualified Data.ByteString as BS
 import Data.Either (fromRight)
 import qualified Language.Wasm as Wasm
 import qualified Language.Wasm.Structure as Wasm
-import qualified Language.Wasm.Validate as Wasm
 import Path
 import System.Directory
-import Test.Hspec
-import qualified VerifiWASM.LangTypes as VerifiWASM
+import System.IO.Silently (silence)
+import Test.Hspec hiding (example)
 import VerifiWASM.Parser (parseVerifiWASMFile)
 import WasmVerify
-import System.IO.Silently (silence)
 
 spec :: Spec
 spec = do
@@ -31,7 +29,7 @@ spec = do
         mAltSpec <- parseVerifiWASMFile altSpecPath
         maybe
           (pure Nothing)
-          (\spec -> Just <$> silence (verifyModule spec wasmModule))
+          (\specification -> Just <$> silence (verifyModule specification wasmModule))
           mSpec
           `shouldReturn` Just True
         maybe
@@ -49,7 +47,7 @@ spec = do
         mSpec <- parseVerifiWASMFile specPath
         maybe
           (pure Nothing)
-          (\spec -> Just <$> silence (verifyModule spec wasmModule))
+          (\specification -> Just <$> silence (verifyModule specification wasmModule))
           mSpec
           `shouldReturn` Just True
 
@@ -62,7 +60,7 @@ spec = do
         mSpec <- parseVerifiWASMFile specPath
         maybe
           (pure Nothing)
-          (\spec -> Just <$> silence (verifyModule spec wasmModule))
+          (\specification -> Just <$> silence (verifyModule specification wasmModule))
           mSpec
           `shouldReturn` Just True
 
@@ -75,9 +73,9 @@ spec = do
         mSpec <- parseVerifiWASMFile specPath
         maybe
           (pure Nothing)
-          (\spec -> Just <$> silence (verifyModule spec wasmModule))
+          (\specification -> Just <$> silence (verifyModule specification wasmModule))
           mSpec
-          `shouldReturn` Just True    
+          `shouldReturn` Just True
 
     context "when verifying examples/example_br_table.wasm" $ do
       it "the verification is successful" $ do
@@ -88,9 +86,9 @@ spec = do
         mSpec <- parseVerifiWASMFile specPath
         maybe
           (pure Nothing)
-          (\spec -> Just <$> silence (verifyModule spec wasmModule))
+          (\specification -> Just <$> silence (verifyModule specification wasmModule))
           mSpec
-          `shouldReturn` Just True      
+          `shouldReturn` Just True
 
     context "when verifying examples/fib.wasm" $ do
       it "the verification is successful" $ do
@@ -103,12 +101,12 @@ spec = do
         mSpec <- parseVerifiWASMFile specPath
         maybe
           (pure Nothing)
-          (\spec -> Just <$> silence (verifyModule spec wasmModule))
+          (\specification -> Just <$> silence (verifyModule specification wasmModule))
           mSpec
           `shouldReturn` Just True
         maybe
           (pure Nothing)
-          (\spec -> Just <$> silence (verifyModule spec wasmAltModule))
+          (\specification -> Just <$> silence (verifyModule specification wasmAltModule))
           mSpec
           `shouldReturn` Just True
 
@@ -121,10 +119,10 @@ spec = do
         mSpec <- parseVerifiWASMFile specPath
         maybe
           (pure Nothing)
-          (\spec -> Just <$> silence (verifyModule spec wasmModule))
+          (\specification -> Just <$> silence (verifyModule specification wasmModule))
           mSpec
-          `shouldReturn` Just True    
-    
+          `shouldReturn` Just True
+
     context "when verifying examples/no_return_fib.wasm" $ do
       it "the verification is successful" $ do
         projectPath <- parseAbsDir =<< getCurrentDirectory
@@ -134,9 +132,9 @@ spec = do
         mSpec <- parseVerifiWASMFile specPath
         maybe
           (pure Nothing)
-          (\spec -> Just <$> silence (verifyModule spec wasmModule))
+          (\specification -> Just <$> silence (verifyModule specification wasmModule))
           mSpec
-          `shouldReturn` Just True    
+          `shouldReturn` Just True
 
     context "when verifying examples/select.wasm" $ do
       it "the verification is successful" $ do
@@ -147,9 +145,9 @@ spec = do
         mSpec <- parseVerifiWASMFile specPath
         maybe
           (pure Nothing)
-          (\spec -> Just <$> silence (verifyModule spec wasmModule))
+          (\specification -> Just <$> silence (verifyModule specification wasmModule))
           mSpec
-          `shouldReturn` Just True    
+          `shouldReturn` Just True
 
   describe "loadModuleFromFile" $ do
     context "given an existing and valid WASM binary file" $
