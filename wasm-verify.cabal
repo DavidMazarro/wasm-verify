@@ -94,7 +94,6 @@ test-suite test
     , bytestring
     , directory
     , hspec
-    , megaparsec
     , path
     , silently
     , wasm
