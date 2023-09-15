@@ -4,7 +4,7 @@
 
   <p>
     <strong>A proof-of-concept formal verification tool for WebAssembly. Based on the researched performed during
-the development of my master's thesis "<i>Specification and verification of WebAssembly programs</i>".</strong>
+the development of my master's thesis <a href="https://oa.upm.es/75802/1/TFM_DAVID_MUNUERA_MAZARRO.pdf">"<i>Specification and verification of WebAssembly programs</i>"</a>.</strong>
   </p>
 
   <p>
