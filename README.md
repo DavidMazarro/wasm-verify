@@ -30,7 +30,7 @@ From within the project's root folder you can run the following command to build
 ```
 cabal install
 ```
-If you would rather not have it in your path, you can build and execute the program from within the repo folder by running:
+Once that's done, you can build and execute the program from within the repo folder by running:
 ```
 cabal exec -- wasm-verify <the flags you want to use>
 ```
