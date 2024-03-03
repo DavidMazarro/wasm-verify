@@ -45,7 +45,7 @@ To use `wasm-verify`, run the command providing it with the WebAssembly
 module containing the functions you want to verify and the VerifiWASM
 specification. Try it out with one of the [examples](examples/):
 ```
-wasm-verify ./examples/fib.wasm --spec ./examples/fib.verifiwasm
+cabal exec -- wasm-verify ./examples/fib.wasm --spec ./examples/fib.verifiwasm
 ```
 (or you can use the short version of `--spec`, which is `-s`).
 
